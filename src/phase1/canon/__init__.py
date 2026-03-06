@@ -1,0 +1,1 @@
+"""Canon merging sub-package."""

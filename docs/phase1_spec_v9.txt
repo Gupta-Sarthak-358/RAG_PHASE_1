@@ -1,0 +1,867 @@
+# Phase 1 — Local Story Canon Engine
+# Consolidated Specification — v9 (Latest)
+#
+# Document history (oldest → newest):
+#   phase 1 rag.txt           — v1: baseline extraction, simple name lookup
+#   phase 1 rag more.txt      — v2: stable char_NNNN IDs, migration logic
+#   phase 1 rage_updation.txt — v3: relationship events, emotional deltas, thread progression
+#   phase1_v4.txt             — v4: name validation, alias matching, honorific stripping, purge commands
+#   phase 1_v5.txt            — v5: evidence schema, JSON repair improvements, event chronological sort
+#   phase 1_v6.txt            — v6: evidence simplified to exact substring only (no fuzzy scoring)
+#   phase 1_v7.txt            — v7: relationship repetition system (signal thresholds, history, signals)
+#   phase 1_v8.txt            — v8: minor fixes (0.6 fuzzy threshold, prompt trim, no word overlap, GPU offloading, skip retry)
+#   phase1_spec_v9.txt        — v9: normalization layer (fuzzy deduplication, relationship priority)
+#
+# This file is the single source of truth. All previous files are superseded.
+# Every design decision is documented with its reasoning inline.
+
+
+# ═══════════════════════════════════════════════════════════════════
+# CHRONOLOGICAL DESIGN DECISIONS  (Why things are the way they are)
+# ═══════════════════════════════════════════════════════════════════
+
+# ── v1 baseline decisions ─────────────────────────────────────────
+#
+# WHY Qwen2.5 7B GGUF via llama-cpp-python for Phase 1?
+#   Better at precise JSON extraction tasks than Mistral.
+#   Mistral will be used in Phase 2 for unstructured summarization tasks.
+#   Fully local, no API cost, deterministic with seed=42, fits in 8GB VRAM.
+#   Q4_K_M quantization gives acceptable quality with ~5GB model size.
+#
+# WHY 8K context window?
+#   Chapters average 1500 words (~2000 tokens). Prompt + schema + response
+#   lands around 4000-5000 tokens. 8K gives room for longer chapters.
+#   MAX_CHAPTER_WORDS = 5000 is a safety truncation before this limit.
+#
+# WHY FAISS IndexFlatIP with normalized vectors?
+#   Normalized inner product = cosine similarity.
+#   sentence-transformers already normalizes embeddings, so this is free.
+#   IndexFlatIP is exact (no approximation), fast enough for ~70 chapters.
+#
+# WHY retry once on extraction failure?
+#   LLMs sometimes produce malformed JSON on first pass.
+#   A second attempt with the same prompt often succeeds (temperature=0.1,
+#   so outputs are ~deterministic but not completely frozen).
+#
+# WHY filter hallucinations at all?
+#   Small 7B models (like Mistral or Qwen) can hallucinate character names.
+#   Early test: 15-20% of extracted characters were pure inventions.
+#   Simple fix: if name doesn't appear in chapter text → discard.
+
+
+# ── v2 decisions: stable character IDs ───────────────────────────
+#
+# PROBLEM: old system keyed characters by display name.
+#   "Akane" and "Akane Uzumaki" create two entries. Merging by name
+#   string is fragile and breaks when names vary.
+#
+# WHY stable char_NNNN IDs instead of name-derived canonical_ids?
+#   Name-derived IDs ("akane_uzumaki") break on name changes.
+#   "Akane Yanagi/Uzumaki" can't be converted to a clean snake_case
+#   identifier without collision risk.
+#   char_0001 is opaque but guaranteed unique and collision-safe.
+#
+# WHY an ID counter file (id_counter.json)?
+#   Deleted characters should not recycle their IDs.
+#   Keeping a persistent counter ensures monotonic increase with no gaps.
+#   Counter is recovered from existing IDs if the file is lost.
+#
+# WHY ambiguity detection returns (None, True) instead of auto-merging?
+#   Auto-merging "Naruto" to "Naruto Uzumaki" is correct.
+#   But auto-merging "Uzumaki" to any Uzumaki is wrong.
+#   The ambiguous flag lets the caller create a fresh stub rather than
+#   silently corrupting two different characters into one entry.
+#
+# WHY _MERGE_GROUPS as explicit config?
+#   Some merges (Akane Yanagi / Akane Uzumaki → char_0001) cannot be
+#   detected automatically without story context. These are one-time
+#   manual declarations that run once during migration.
+#
+# Relationship format during v2: dict keyed by char_id
+#   {"char_0002": {"current_status": "ally", "since_chapter": 5}}
+#   NOTE: This format is superseded in v7 — see relationship repetition section.
+
+
+# ── v3 decisions: relationship events, emotional deltas, threads ──
+#
+# WHY separate relationship_events list instead of overwriting relationships?
+#   "Naruto and Sasuke fight" in ch12 doesn't erase their alliance from ch8.
+#   A single relationship label (ally/enemy) loses the timeline.
+#   Event-based history preserves the progression: met → ally → fight → reconcile.
+#
+# WHY emotional_deltas as append-only log per character per chapter?
+#   Phase 1 does not need a running emotional state tracker.
+#   Storing raw deltas per chapter makes it easy to replay history or
+#   feed the data into a Phase 2 tracker without re-extracting.
+#   Delta bounds: -0.3 to +0.3 per chapter. Large swings are narrative noise.
+#
+# WHY thread_progression with status_change values instead of just description?
+#   Freeform descriptions don't allow queries like "all threads that escalated".
+#   Enum status_change (advanced|escalated|complicated|stalled|resolved) enables
+#   structured querying while justification preserves the narrative reason.
+#
+# WHY purge_chapter preserves character entries but removes chapter data?
+#   Characters exist across the whole story. The chapter data (events, deltas,
+#   thread updates, relationship events) is chapter-specific and safe to replace.
+#   Removing a character entry and re-creating it would lose data from other chapters.
+
+
+# ── v4 decisions: name validation and alias matching ─────────────
+#
+# PROBLEM: LLMs output role/group labels as character names.
+#   "The Jonin Commander", "Team 7", "several shinobi" appeared as characters.
+#   These are not individuals. They pollute the character database.
+#
+# WHY reject prefixes ("the ", "a ", "an ", "some ", "several ")?
+#   Real character names never start with articles.
+#   "The Jonin" is always a group reference, not a person.
+#
+# WHY reject role words (ninja, shinobi, jonin, chunin, genin, captain, etc.)?
+#   Role descriptors as the full name = group hallucination.
+#   "Jonin" with nothing else is a rank, not a name.
+#   NOTE: "Captain Yamato" passes validation (Yamato is a real name).
+#   The rejection is for names WHERE ALL WORDS are role words.
+#
+# WHY reject commas and "and"?
+#   "Naruto and Sasuke" is the LLM cramming two characters into one slot.
+#   Any name with a comma or " and " is a multi-person entry.
+#
+# WHY NAME_MAX_WORDS = 3?
+#   Real names: 1-3 words (given name + family name + optional alternate).
+#   "The fake Konoha shinobi leader" is clearly a description, not a name.
+#
+# WHY honorific stripping in the MERGER not the EXTRACTOR?
+#   The extractor keeps names as they appear in the text (for faithfulness).
+#   The merger strips honorifics (-sama, -kun, -chan, -hime, etc.) to improve
+#   the alias lookups. "Tsunade-Hime" → try matching "Tsunade" after strip.
+#
+# WHY _is_valid_character_name returns (bool, reason) instead of just bool?
+#   Structured rejection reason makes console output specific and debuggable.
+#   "✗ rejected: 'The Jonin' (starts with 'the')" is far more useful than
+#   a bare rejection with no explanation.
+
+
+# ── v5 decisions: evidence schema and JSON repair ─────────────────
+#
+# WHY add evidence fields to every extracted item?
+#   LLMs hallucinate confidently. A character can be "extracted" from text
+#   where they never appear. Requiring an exact quote as evidence anchors each
+#   extraction to source text. This is the primary hallucination filter.
+#
+# WHY evidence as an EXACT quote, not a paraphrase?
+#   Paraphrases require semantic similarity to verify — expensive.
+#   Exact quotes can be verified with a simple substring check.
+#   The prompt says: "copy the sentence exactly as it appears".
+#
+# WHY keep the name-in-text fallback when evidence is absent?
+#   Some older data had no evidence fields.
+#   If the LLM doesn't produce evidence, falling back to name-in-text
+#   preserves the useful extraction instead of discarding it entirely.
+#
+# WHY sort events and relationship_events by chapter after merge?
+#   Chapters can be reprocessed out of order.
+#   A chapter 4 reprocess after chapter 10 was processed appends at the end.
+#   Sorting ensures chronological order for any consumer of the event list.
+#
+# WHY the JSON repair pipeline?
+#   Language models regularly produce minor JSON syntax errors:
+#     - Trailing commas         → stripped by regex
+#     - Adjacent strings with no comma between  → ",\n" inserted
+#     - Adjacent objects with no comma  → }{ → },{
+#     - Single-quoted strings   → converted to double-quoted
+#     - Newlines inside strings → escaped
+#   Each repair step solves a specific observed failure mode.
+#   The pipeline is applied to the entire raw output, then to bracket-
+#   extracted substrings, then to fenced code blocks — most lenient last.
+
+
+# ── v6 decisions: simplifying evidence verification ───────────────
+#
+# REMOVED: _normalize_for_evidence() function
+#   Reason: whitespace-normalizing both evidence and chapter text before
+#   comparison added complexity with minimal benefit. The main source of
+#   evidence mismatch is the LLM paraphrasing, not whitespace differences.
+#   Simple case-insensitive substring check is sufficient.
+#
+# REMOVED: Fuzzy word-overlap matching (EVIDENCE_FUZZY_THRESHOLD)
+#   Reason: If the LLM paraphrases the evidence, the quote is already wrong.
+#   Fuzzy matching accepts paraphrases, which defeats the purpose of evidence.
+#   Either the exact sentence is there or the extraction is suspect.
+#   "~ evidence fuzzy-matched" was noise, not a useful signal.
+#
+# REMOVED: EVIDENCE_FUZZY_THRESHOLD constant from config.py
+#   No longer needed.
+#
+# KEPT: EVIDENCE_MIN_WORDS = 3
+#   A 1-2 word evidence quote is not meaningful ("she said" proves nothing).
+#   Minimum 3 words ensures the quote is a real phrase, not a fragment.
+#
+# KEPT: name-in-text fallback
+#   When evidence field is absent entirely, name-in-text is still applied.
+#   This handles old data and cases where the LLM omits evidence.
+#
+# RESULT: _verify_evidence() is now 5 lines:
+#   evidence.strip().lower() in chapter_text.lower()
+#   with a min-word guard. No normalization, no fuzzy matching.
+
+
+# ── v7 decisions: relationship repetition system ──────────────────
+#
+# PROBLEM: LLMs overreact to single events.
+#   "Naruto and Sasuke argue" → extractor outputs: enemy
+#   But they've argued a thousand times and remained allies.
+#   A single event should never flip a relationship state.
+#
+# WHY signal counting instead of event-based instant promotion?
+#   Story relationships build gradually through repeated behavior patterns.
+#   One argument = a moment. Three arguments = a pattern = conflict.
+#   Counting preserves the event (for history) but gates the state change.
+#
+# WHY the specific thresholds?
+#   betrayal >= 1  → enemy (instant flip)
+#     Reason: betrayal is a singular act that correctly redefines a relationship.
+#     A friend who betrays you is now an enemy, regardless of prior history.
+#     "Humans forgive slowly but betrayals hit hard."
+#
+#   kiss/confession/alliance >= 1 → romantic/ally (instant)
+#     Reason: These are singular declarative events. A confession is not a
+#     pattern — it's a pivot point. An explicit alliance agreement is a fact.
+#
+#   romantic_progression >= 2 → romantic
+#     Reason: ambiguous romantic tension requires repetition to confirm.
+#     One scene of "romantic tension" could be reader projection.
+#
+#   cooperation >= 2 → ally
+#     Reason: one cooperative act could be circumstantial. Two signals
+#     indicate a deliberate pattern of working together.
+#
+#   trust_gain >= 2 → friend
+#     Reason: trust is built over multiple demonstrated moments.
+#
+#   argument >= 3 → conflict
+#     Reason: the highest bar because arguments are common and rarely
+#     define a permanent relationship shift in long-running stories.
+#
+# WHY REL_MIN_INTERACTIONS = 2?
+#   Prevents "met + argument = enemy" in a single chapter.
+#   Characters who just met cannot have a defined relationship state yet.
+#   The first chapter of any pair is introductory, not definitional.
+#
+# WHY does _set_static_relationship bypass thresholds?
+#   Explicit declarations in the extraction ("she is his sister") are
+#   authoritative facts, not signals to count. Family, mentor, and other
+#   explicitly-stated labels are not patterns — they are story facts.
+#   _record_rel_event is for dynamic events. _set_static_relationship
+#   is for ground-truth declarations.
+#
+# NEW relationship format:
+#   {
+#     "state": "neutral",          ← derived from signal thresholds
+#     "history": [                  ← every event, in order
+#       {"chapter": 4, "event": "argument"},
+#       {"chapter": 5, "event": "argument"},
+#       {"chapter": 6, "event": "argument"}
+#     ],
+#     "signals": {                  ← counts per event_type
+#       "argument": 3
+#     }
+#   }
+#
+# Migration: old {current_status, since_chapter} format is migrated on-the-fly
+#   in _ensure_rel_entry() when a character's relationship entry is first accessed.
+
+
+# ── v8 decisions: minor fixes & optimizations ──────────────────────────
+#
+# WHY reintroduce fuzzy matching?
+#   Exact match was too brittle due to minor differences in character names
+#   or light paraphrasing. Reintroduced with a lower threshold (0.6) to allow
+#   some leniency while still anchoring to the text.
+#   Added EVIDENCE_FUZZY_THRESHOLD = 0.6.
+#
+# WHY normalize whitespace in evidence matching?
+#   Line breaks in dialogue broke exact matching. Normalizing whitespace
+#   (converting all newlines/tabs/spaces to a single space) fixes this.
+#
+# WHY shrink the prompt?
+#   Removed the explanatory essay and reduced rules from ~40 lines to 10.
+#   Schema remains intact. Saves 500-800 tokens per call, reducing latency.
+#
+# WHY remove word-overlap in canon merger (_find_character_id)?
+#   Pass 3 (significant-word overlap) caused phantom merges (e.g., "The" matching
+#   "The Jonin" matching "The fake Konoha ninjas"). Removed to enforce stricter
+#   matching (only exact and first-name match).
+#
+# WHY skip retry on success?
+#   No need to loop if the first attempt parses successfully. Returns immediately.
+#
+# WHY lowered max tokens and GPU offloading?
+#   Added MODEL_GPU_LAYERS = -1 in config to enable full GPU offload via llama.cpp.
+#   Reduced MODEL_MAX_TOKENS = 1200 since extractions are typically shorter.
+#   Reduces extraction time from ~60-90s to ~25-45s per chapter.
+
+
+# ── v9 decisions: normalization layer ──────────────────────────────────────────
+#
+# PROBLEM: Raw extractions contain highly varied labels and redundant entries.
+#   "Fireball Jutsu", "Fireball Technique", "Katon: Fireball" are extracted as
+#   separate abilities. Minor variations in plot thread names or event descriptions
+#   cause duplicate entries in the JSON.
+#
+# WHY a dedicated normalizer.py?
+#   Keeps canon_merger.py clean and focused on merging logic. The normalizer
+#   acts as an intermediate pure Python layer that deduplicates and sanitizes
+#   the extraction dictionary *before* it touches the story state.
+#
+# WHY RapidFuzz?
+#   Much faster and more accurate than difflib for string comparison. It handles
+#   the fuzzy matching required for deduplicating plot threads, abilities, and events.
+#   A fallback to difflib is provided if rapidfuzz is uninstalled.
+#
+# WHY ABILITY_NOISE_WORDS = {"technique", "jutsu", "no"}?
+#   Removing these common suffixes before comparing two abilities dramatically
+#   improves the accuracy of deduplication (e.g., "Fireball Jutsu" vs "Fireball").
+#
+# WHY REL_PRIORITY overriding?
+#   Relationships like "family" are permanent. A sequence of "allies" -> "family"
+#   is a valid upgrade, but "family" -> "allies" is a downgrade and should be
+#   ignored. The new config priority scale ensures explicit static relationships
+#   only move upwards in significance.
+
+# ═══════════════════════════════════════════════════════════════════
+# EXTRACTION SCHEMA  (what the LLM produces)
+# ═══════════════════════════════════════════════════════════════════
+
+# Every item now includes an 'evidence' field with an exact quote.
+#
+# {
+#   "chapter_number": <int>,
+#   "new_characters": [
+#     {
+#       "name": "<exact name from text>",
+#       "description": "<string>",
+#       "status": "<alive|dead|unknown>",
+#       "abilities": ["<string>"],
+#       "relationships": [
+#         {"character": "<string>",
+#          "relationship": "<ally|enemy|mentor|student|friend|romantic|family|rival>"}
+#       ],
+#       "evidence": "<exact sentence from chapter where this character appears>"
+#     }
+#   ],
+#   "character_updates": [
+#     {
+#       "name": "<exact name from text>",
+#       "status": "<string or null>",
+#       "new_abilities": ["<string>"],
+#       "new_relationships": [
+#         {"character": "<string>",
+#          "relationship": "<ally|enemy|mentor|student|friend|romantic|family|rival>"}
+#       ],
+#       "detail": "<string>",
+#       "evidence": "<exact sentence proving this update>"
+#     }
+#   ],
+#   "major_events": [
+#     {
+#       "event": "<string>",
+#       "evidence": "<exact sentence proving this event>"
+#     }
+#   ],
+#   "new_plot_threads": [{"name": "<string>", "description": "<string>"}],
+#   "resolved_plot_threads": ["<string>"],
+#   "relationship_events": [
+#     {
+#       "characters": ["<name_1>", "<name_2>"],
+#       "event_type": "<met|confession|kiss|argument|alliance|betrayal|trust_gain|trust_loss|romantic_progression|cooperation>",
+#       "description": "<string>",
+#       "evidence": "<exact sentence proving this interaction>"
+#     }
+#   ],
+#   "emotional_deltas": {
+#     "<character_name>": {
+#       "<hope|fear|anger|trust|grief>": <float -0.3 to +0.3>,
+#       "evidence": "<exact sentence showing this emotional shift>"
+#     }
+#   },
+#   "thread_progression": [
+#     {
+#       "thread_name": "<string>",
+#       "status_change": "advanced|escalated|complicated|stalled|resolved",
+#       "justification": "<short string>"
+#     }
+#   ]
+# }
+
+
+# ═══════════════════════════════════════════════════════════════════
+# FILTER PIPELINE  (order matters)
+# ═══════════════════════════════════════════════════════════════════
+
+# For each extracted item:
+#
+# 1. NAME VALIDATION (_is_valid_character_name)
+#    Rejects: empty, >3 words, commas, "and", reject prefixes (the/a/an...),
+#             role/group words (ninja/shinobi/jonin/chunin/genin/captain...),
+#             all-lowercase multi-word (descriptions), pure role names (jonin alone)
+#
+# 2. EVIDENCE VERIFICATION (_verify_evidence)
+#    If evidence present:
+#      - Must be >= EVIDENCE_MIN_WORDS (3) long
+#      - Must appear as exact substring in chapter text (case-insensitive)
+#      - If passes → accept, stop here
+#      - If fails → reject (print ✗ reason)
+#    If evidence absent → fall through to step 3
+#
+# 3. NAME-IN-TEXT FALLBACK (_name_in_text)
+#    Check if name (or any substantial part) appears in chapter text.
+#    If yes → accept with warning ("~ no evidence, accepted via name-in-text")
+#    If no  → reject ("✗ no evidence, name not in text")
+#
+# 4. NORMALIZATION LAYER (normalizer.py)
+#    Applied to the entire extraction dictionary before merging:
+#      - Cleans character names
+#      - Fuzzy deduplicates abilities, major events, relationship events
+#      - Matches new plot threads against existing unresolved threads
+#
+# Special cases:
+#   major_events with no evidence → kept (events are descriptions, no name to check)
+#   thread_progression → never filtered (thread names are abstract labels)
+
+
+# ═══════════════════════════════════════════════════════════════════
+# RELATIONSHIP STATE DERIVATION  (v7)
+# ═══════════════════════════════════════════════════════════════════
+
+# Two paths into the relationship system:
+#
+# PATH A: _set_static_relationship(chars, from_cid, to_cid, rel_type, chapter)
+#   Used for: explicitly-stated relationships ("she is his sister")
+#   Behavior: writes state directly without going through thresholds
+#   Examples: family, mentor, student, romantic (when explicitly declared)
+#
+# PATH B: _record_rel_event(chars, from_cid, to_cid, event_type, chapter)
+#   Used for: dynamic events from relationship_events extraction
+#   Behavior: appends to history, increments signal count, calls _compute_rel_state
+#   Both directions are updated simultaneously (from→to AND to→from)
+#
+# _compute_rel_state(signals, history) → str:
+#   Guard: if len(history) < REL_MIN_INTERACTIONS (2) → "neutral"
+#   Then checks REL_SIGNAL_THRESHOLDS in priority order:
+#     betrayal >= 1          → "enemy"
+#     romantic_progression>=2 → "romantic"
+#     kiss >= 1              → "romantic"
+#     confession >= 1        → "romantic"
+#     cooperation >= 2       → "ally"
+#     alliance >= 1          → "ally"
+#     trust_gain >= 2        → "friend"
+#     argument >= 3          → "conflict"
+#     trust_loss >= 3        → "rival"
+#   Default → "neutral"
+#
+# The order of thresholds matters (betrayal is checked first, highest priority).
+
+
+# ═══════════════════════════════════════════════════════════════════
+# CHARACTER IDENTITY SYSTEM  (v2, unchanged)
+# ═══════════════════════════════════════════════════════════════════
+
+# Lookup pipeline (_find_character_id):
+#   Pass 1: exact normalized match against display_name and aliases
+#   Pass 2: significant-word overlap (words >3 chars), best match wins
+#   Ambiguity: if two characters tie → (None, True), new stub created
+#
+# Auto-create stub on _resolve_char_id:
+#   If no match found → mint new char_NNNN, initialize empty entry
+#   If ambiguous → warn + mint new separate entry
+#
+# Honorific stripping during lookup:
+#   Strips: -sama, -kun, -chan, -hime, -dono, -sensei, -senpai
+#   Strips title prefixes: Lord, Lady, Prince, Princess, Sir
+#   Original lookup tried first, then stripped variant
+#
+# _MERGE_GROUPS:
+#   Explicit one-time migration declarations for aliases the system
+#   cannot detect automatically (e.g., Akane Yanagi AND Akane Uzumaki
+#   are both the same person — the system cannot infer this from names).
+
+
+# ═══════════════════════════════════════════════════════════════════
+# STORY STATE STRUCTURE  (story_state.json)
+# ═══════════════════════════════════════════════════════════════════
+
+# {
+#   "characters": {
+#     "char_0001": {
+#       "id": "char_0001",
+#       "display_name": "Akane Yanagi/Uzumaki",
+#       "aliases": ["Akane", "Akane Uzumaki", "Akane Yanagi"],
+#       "first_appearance": 1,
+#       "status": "alive",
+#       "description": "...",
+#       "abilities": ["Dream Manipulation", ...],
+#       "relationships": {
+#         "char_0026": {
+#           "state": "romantic",              ← derived from signals
+#           "history": [
+#             {"chapter": 10, "event": "met"},
+#             {"chapter": 15, "event": "cooperation"},
+#             {"chapter": 22, "event": "romantic_progression"},
+#             {"chapter": 30, "event": "romantic_progression"}
+#           ],
+#           "signals": {
+#             "met": 1,
+#             "cooperation": 1,
+#             "romantic_progression": 2    ← >= 2 → romantic
+#           }
+#         }
+#       },
+#       "updates": [{"chapter": 1, "detail": "First appearance: ..."}]
+#     }
+#   },
+#   "events": [
+#     {
+#       "chapter": 5,
+#       "event": "Akane enters Kushina's dream realm",
+#       "evidence": "Akane stepped into the swirling chakra..."   ← optional
+#     }
+#   ],
+#   "plot_threads": {
+#     "Akane's Missing Heritage": {
+#       "introduced": 3,
+#       "status": "unresolved",
+#       "description": "...",
+#       "updates": [
+#         {"chapter": 3, "detail": "...", "status_change": "advanced", "justification": "..."}
+#       ]
+#     }
+#   },
+#   "relationship_events": [
+#     {
+#       "chapter": 15,
+#       "characters": ["char_0001", "char_0026"],
+#       "event_type": "cooperation",
+#       "description": "Train together under Tsunade",
+#       "evidence": "The two of them trained side by side..."   ← optional
+#     }
+#   ],
+#   "emotional_deltas": {
+#     "char_0001": [
+#       {
+#         "chapter": 15,
+#         "deltas": {"fear": -0.1, "trust": 0.2},
+#         "evidence": "She exhaled slowly, feeling safer..."   ← optional
+#       }
+#     ]
+#   },
+#   "metadata": {
+#     "last_updated": "2026-03-04T10:00:00Z",
+#     "chapters_processed": [1, 2, 3, ...]
+#   }
+# }
+
+
+# ═══════════════════════════════════════════════════════════════════
+# CONFIG.PY  (complete, current state)
+# ═══════════════════════════════════════════════════════════════════
+
+"""
+Central configuration for the canon engine.
+All paths, model settings, and tuning knobs live here.
+"""
+
+import os
+
+# ---------------------------------------------------------------------------
+# Model
+# ---------------------------------------------------------------------------
+MODEL_PATH = os.environ.get(
+    "MODEL_PATH",
+    "./models/qwen2.5-7b-instruct-q4_k_m.gguf",
+)
+MODEL_CONTEXT = 8192
+MODEL_THREADS = max(os.cpu_count() - 1, 1)
+MODEL_TEMPERATURE = 0.1
+MODEL_MAX_TOKENS = 2048
+MODEL_SEED = 42
+
+# ---------------------------------------------------------------------------
+# Directories
+# ---------------------------------------------------------------------------
+CHAPTERS_DIR = os.environ.get("CHAPTERS_DIR", "./chapters")
+OUTPUT_DIR = os.environ.get("OUTPUT_DIR", "./output")
+INDEX_DIR = os.path.join(OUTPUT_DIR, "index")
+EXTRACTION_FAILURE_DIR = os.path.join(".", "logs", "extraction_failures")
+
+# ---------------------------------------------------------------------------
+# Output files
+# ---------------------------------------------------------------------------
+STORY_STATE_FILE = os.path.join(OUTPUT_DIR, "story_state.json")
+CONFLICT_LOG_FILE = os.path.join(OUTPUT_DIR, "conflict_log.json")
+PROCESSED_FILE = os.path.join(OUTPUT_DIR, "processed_chapters.json")
+CANON_SUMMARY_FILE = os.path.join(OUTPUT_DIR, "Canon_Bible_Summary.txt")
+ID_COUNTER_FILE = os.path.join(OUTPUT_DIR, "id_counter.json")
+
+# ---------------------------------------------------------------------------
+# Chunking (for FAISS embeddings)
+# ---------------------------------------------------------------------------
+CHUNK_SIZE_WORDS = 500
+CHUNK_OVERLAP_WORDS = 100
+
+# ---------------------------------------------------------------------------
+# Extraction safety
+# ---------------------------------------------------------------------------
+MAX_CHAPTER_WORDS = 5000
+
+# ---------------------------------------------------------------------------
+# Retrieval
+# ---------------------------------------------------------------------------
+EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
+TOP_K = 5
+
+# ---------------------------------------------------------------------------
+# Emotional extraction (Phase 1 storage only)
+# ---------------------------------------------------------------------------
+EMOTIONAL_DIMENSIONS = ("hope", "fear", "anger", "trust", "grief")
+MAX_EMOTIONAL_DELTA = 0.3
+
+# ---------------------------------------------------------------------------
+# Thread progression
+# ---------------------------------------------------------------------------
+VALID_THREAD_STATUSES = (
+    "advanced", "escalated", "complicated", "stalled", "resolved",
+)
+
+# ---------------------------------------------------------------------------
+# Character name validation (v4)
+# WHY: prevent role descriptors and group references from being stored as characters
+# ---------------------------------------------------------------------------
+NAME_MAX_WORDS = 3
+
+NAME_REJECT_PREFIXES = (
+    "the ", "a ", "an ", "some ", "several ",
+    "those ", "these ", "fake ", "unknown ",
+)
+
+NAME_REJECT_WORDS = frozenset({
+    "group", "team", "ninjas", "shinobi", "leader", "captain",
+    "kunoichi", "jonin", "chunin", "genin", "commander", "squad",
+    "clan", "forces", "troops", "guards", "villagers", "elders",
+    "council", "anbu", "division", "unit", "civilians", "soldiers",
+    "agents", "members", "warriors", "assassins", "mercenaries",
+    "spies", "scouts", "medics", "fake", "missing", "rogue",
+})
+
+NAME_PURE_ROLES = frozenset({
+    "jonin", "chunin", "genin", "hokage", "kazekage", "raikage",
+    "mizukage", "tsuchikage", "anbu", "sensei", "captain",
+    "commander", "elder", "leader", "medic", "sannin",
+    "jinchuriki", "kage", "daimyo",
+})
+
+# ---------------------------------------------------------------------------
+# Relationship system (v3, v7)
+# ---------------------------------------------------------------------------
+REL_TYPES = frozenset({
+    "ally", "enemy", "mentor", "student",
+    "friend", "romantic", "family", "rival",
+})
+
+REL_EVENT_TYPES = frozenset({
+    "met", "confession", "kiss", "argument",
+    "alliance", "betrayal", "trust_gain", "trust_loss",
+    "romantic_progression", "cooperation",
+})
+
+REL_LABEL_TO_TYPE: dict[str, str] = {
+    "father": "family", "mother": "family", "parent": "family",
+    "brother": "family", "sister": "family", "sibling": "family",
+    "son": "family", "daughter": "family", "child": "family",
+    "uncle": "family", "aunt": "family", "cousin": "family",
+    "grandfather": "family", "grandmother": "family",
+    "grandson": "family", "granddaughter": "family",
+    "relative": "family", "clan member": "family",
+    "spouse": "romantic", "wife": "romantic", "husband": "romantic",
+    "fiance": "romantic", "fiancee": "romantic",
+    "lover": "romantic", "romantic partner": "romantic",
+    "girlfriend": "romantic", "boyfriend": "romantic",
+    "love interest": "romantic", "beloved": "romantic",
+    "teacher": "mentor", "sensei": "mentor",
+    "master": "mentor", "instructor": "mentor",
+    "apprentice": "student", "pupil": "student",
+    "disciple": "student",
+    "teammate": "ally", "comrade": "ally",
+    "companion": "ally", "allies": "ally",
+    "nemesis": "enemy", "foe": "enemy",
+    "best friend": "friend", "close friend": "friend",
+    "childhood friend": "friend",
+    "competitor": "rival",
+}
+
+# REL_EVENT_PROMOTION is REMOVED in v7.
+# Replaced by REL_SIGNAL_THRESHOLDS.
+# Reason: instant promotion caused overreacting relationships.
+
+# ---------------------------------------------------------------------------
+# Relationship repetition thresholds (v7)
+# WHY: single events should not define relationship state.
+#      Only repeated signals indicate a genuine pattern.
+# ---------------------------------------------------------------------------
+REL_SIGNAL_THRESHOLDS: dict[str, tuple[int, str]] = {
+    # event_type          : (min_count, resulting_state)
+    "betrayal"            : (1, "enemy"),       # instant — betrayal redefines relationships
+    "romantic_progression": (2, "romantic"),
+    "kiss"                : (1, "romantic"),     # instant — singular declarative act
+    "confession"          : (1, "romantic"),     # instant — singular declarative act
+    "cooperation"         : (2, "ally"),
+    "alliance"            : (1, "ally"),         # instant — explicit agreement
+    "trust_gain"          : (2, "friend"),
+    "argument"            : (3, "conflict"),     # highest bar — arguments are common in stories
+    "trust_loss"          : (3, "rival"),
+}
+
+# Minimum total interactions before any state change is allowed.
+# WHY: prevents "met + argument = enemy" within a single chapter.
+REL_MIN_INTERACTIONS = 2
+
+# ---------------------------------------------------------------------------
+# Evidence verification (v5, simplified in v6)
+# WHY EVIDENCE_MIN_WORDS: a 1-2 word quote proves nothing
+# WHY no fuzzy threshold: exact match only, fuzzy accepts paraphrases which defeats the purpose
+# ---------------------------------------------------------------------------
+EVIDENCE_MIN_WORDS = 3
+
+# ---------------------------------------------------------------------------
+# Create directories on import
+# ---------------------------------------------------------------------------
+os.makedirs(OUTPUT_DIR, exist_ok=True)
+os.makedirs(INDEX_DIR, exist_ok=True)
+os.makedirs(EXTRACTION_FAILURE_DIR, exist_ok=True)
+
+
+# ═══════════════════════════════════════════════════════════════════
+# DIFF SUMMARY — what changed in each version
+# ═══════════════════════════════════════════════════════════════════
+
+# ┌─────────────────┬───────────────────────────────────────────────────────────┐
+# │ Version         │ Changes                                                   │
+# ├─────────────────┼───────────────────────────────────────────────────────────┤
+# │ v1 baseline     │ config, model_loader, extractor (basic), canon_merger     │
+# │                 │ (name-keyed), embedder, retriever, summarizer, main       │
+# ├─────────────────┼───────────────────────────────────────────────────────────┤
+# │ v2 stable IDs   │ config: ID_COUNTER_FILE                                   │
+# │                 │ canon_merger: char_NNNN IDs, _find_character_id,          │
+# │                 │   _resolve_char_id, _next_char_id, migration functions,   │
+# │                 │   _MERGE_GROUPS, _update_references                       │
+# │                 │ main: migrate command                                     │
+# ├─────────────────┼───────────────────────────────────────────────────────────┤
+# │ v3 events+deltas│ config: EMOTIONAL_DIMENSIONS, MAX_EMOTIONAL_DELTA,        │
+# │                 │   VALID_THREAD_STATUSES, REL_TYPES, REL_EVENT_TYPES,      │
+# │                 │   REL_LABEL_TO_TYPE, REL_EVENT_PROMOTION                  │
+# │                 │ extractor: relationship_events, emotional_deltas,         │
+# │                 │   thread_progression in schema + validation               │
+# │                 │ canon_merger: _merge_relationship_events,                 │
+# │                 │   _merge_emotional_deltas, _merge_thread_progression,     │
+# │                 │   _classify_label_to_type, _classify_label_to_event,      │
+# │                 │   _set_static_relationship, purge_chapter                 │
+# │                 │ file_processor: unmark_chapters                           │
+# │                 │ main: reprocess command                                   │
+# ├─────────────────┼───────────────────────────────────────────────────────────┤
+# │ v4 validation   │ config: NAME_MAX_WORDS, NAME_REJECT_PREFIXES,             │
+# │                 │   NAME_REJECT_WORDS, NAME_PURE_ROLES                      │
+# │                 │ extractor: _is_valid_character_name (hard validator),      │
+# │                 │   integrated into _filter_hallucinations                  │
+# │                 │ canon_merger: title/honorific stripping, improved          │
+# │                 │   _find_character_id, _dedupe_list, purge_characters,     │
+# │                 │   auto_cleanup                                             │
+# │                 │ main: purge, cleanup commands                             │
+# ├─────────────────┼───────────────────────────────────────────────────────────┤
+# │ v5 evidence     │ config: EVIDENCE_MIN_WORDS, EVIDENCE_FUZZY_THRESHOLD      │
+# │                 │ extractor: evidence field in all schema items,            │
+# │                 │   _normalize_for_evidence, _verify_evidence (fuzzy+exact),│
+# │                 │   _repair_json_string (trailing comma, string/object gaps),│
+# │                 │   _log_extraction_failure, EXTRACTION_FAILURE_DIR         │
+# │                 │ canon_merger: major_events now dicts (event+evidence),    │
+# │                 │   _merge_relationship_events stores evidence,             │
+# │                 │   _merge_emotional_deltas stores evidence,                │
+# │                 │   sort events + relationship_events by chapter            │
+# ├─────────────────┼───────────────────────────────────────────────────────────┤
+# │ v6 simplify     │ config: removed EVIDENCE_FUZZY_THRESHOLD                  │
+# │                 │ extractor: removed _normalize_for_evidence, removed fuzzy  │
+# │                 │   word-overlap in _verify_evidence (exact substring only),│
+# │                 │   removed fuzzy-matched warnings                           │
+# │                 │ canon_merger: removed 'between'/'type' fallback keys,     │
+# │                 │   removed REL_EVENT_PROMOTION instant-flip logic           │
+# ├─────────────────┼───────────────────────────────────────────────────────────┤
+# │ v7 repetition   │ config: added REL_SIGNAL_THRESHOLDS, REL_MIN_INTERACTIONS │
+# │                 │   removed REL_EVENT_PROMOTION                             │
+# │                 │ canon_merger: added _ensure_rel_entry, _compute_rel_state,│
+# │                 │   _record_rel_event; updated _set_static_relationship to  │
+# │                 │   write new {state, history, signals} format;             │
+# │                 │   _merge_relationship_events calls _record_rel_event;     │
+# │                 │   _merge_new_characters and _merge_character_updates use  │
+# │                 │   _record_rel_event for dynamic labels                    │
+# ├─────────────────┼───────────────────────────────────────────────────────────┤
+# │ v9 normalization│ config: added REL_PRIORITY, FUZZY thresholds, NOISE_WORDS │
+# │                 │ normalizer.py: added normalization step for entire extract│
+# │                 │ canon_merger.py: integrated normalize_extraction, updated │
+# │                 │   relationship priority upgrade logic in static rels      │
+# └─────────────────┴───────────────────────────────────────────────────────────┘
+
+
+# ═══════════════════════════════════════════════════════════════════
+# FILES IN THE CODEBASE  (current state)
+# ═══════════════════════════════════════════════════════════════════
+
+# config.py          — all constants, no logic
+# model_loader.py    — singleton LLM loader (Qwen2.5), generate() wrapper
+# extractor.py       — schema, prompt, JSON repair, validation, filter
+# normalizer.py      — deduplicates and sanitizes LLM extraction dicts
+# canon_merger.py    — merge extractions into story_state.json
+# embedder.py        — chunk chapters, encode with MiniLM, build FAISS index
+# retriever.py       — load FAISS index, encode query, return top-K chunks
+# summarizer.py      — read story_state, generate Canon Bible summary
+# file_processor.py  — scan chapters dir, track processed, unmark for reprocess
+# recap.py           — generates a one-command story recap printed to stdout
+# main.py            — CLI: extract, index, summary, query, migrate, reprocess,
+#                             purge, cleanup, recap
+
+
+# ═══════════════════════════════════════════════════════════════════
+# CONSOLE OUTPUT GUIDE  (what symbols mean)
+# ═══════════════════════════════════════════════════════════════════
+
+# Extraction:
+#   [ch64/attempt1] JSON parsed directly ✓       — clean parse, no repair needed
+#   [ch64/attempt1] JSON parsed via bracket + repair ✓  — repaired before parse
+#   [ch64/attempt1] all JSON parse strategies failed ✗  — logged to failure dir
+
+# Hallucination filter:
+#   ✓ (no output)                                — item accepted
+#   ✗ rejected character: 'The Jonin' (starts with 'the')    — name validation
+#   ✗ evidence not found for character: 'Sakura' → "..."      — evidence miss
+#   ~ no evidence for 'Kaguya', accepted via name-in-text     — fallback used
+#   ✗ no evidence, name not in text: 'Sakura'                 — fully rejected
+
+# Relationship repetition:
+#   (no output on normal event recording)
+#   ⚠ Ambiguous alias match for 'Uzumaki': [char_0001, char_0002]
+
+# Merger:
+#   [ch64] chars=0 updates=3 events=2 rel_events=1 emo_deltas=1 threads=1
+#   ✓ merged
+#   ⚠ 2 new conflict(s) logged       — status contradiction or thread reappears
+
+
+# ═══════════════════════════════════════════════════════════════════
+# THINGS NOT IN PHASE 1  (deferred to Phase 2)
+# ═══════════════════════════════════════════════════════════════════
+
+# - Running emotional state tracker (Phase 1 stores deltas only)
+# - Derived relationship state query API (Phase 1 stores signals only)
+# - Semantic similarity for evidence verification
+# - Automatic duplicate character detection and merge
+# - Multi-chapter arc detection
+# - Character screen-time tracking
+# - Conflict resolution UI
+# - Auto-generated chapter summaries stored in state

@@ -28,7 +28,7 @@ MODEL_GPU_LAYERS = -1   # -1 = offload all layers to GPU; set to 0 to disable GP
 PHASE1_MODEL_NAME = "qwen2.5-7b-instruct"
 PHASE1_MODEL_PATH = os.environ.get(
     "PHASE1_MODEL_PATH",
-    _p("models", "qwen2.5-7b-instruct.gguf"),
+    _p("models", "qwen2.5-7b-instruct-q4_k_m.gguf"),
 )
 PHASE1_TEMPERATURE = 0.1
 PHASE1_MAX_TOKENS = 1200

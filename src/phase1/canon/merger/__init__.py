@@ -1,0 +1,1 @@
+"""Canon merger modules."""

@@ -1,0 +1,23 @@
+## Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.env
+.pytest_cache/
+
+## Models (large binary weights)
+models/
+*.gguf
+
+## Data directories (user content, not code)
+chapters/
+output/
+logs/
+
+## Virtual environment
+venv/
+
+## Temp files
+*.tmp
+*_out.txt

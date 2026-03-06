@@ -1,0 +1,3766 @@
+The user wants me to implement Phase 2 of their narrative AI system. This is a substantial engineering task that layers on top of their existing Phase 1 canon engine. Let me carefully go through every requirement and build complete, working Python modules.
+
+Let me plan the architecture:
+
+thread_health.py - Track plot thread health with heuristic pressure calculations
+
+tension_model.py - Track narrative tension with hard constraints
+
+outline_planner.py - Two-pass outline generation using LLM within constraints
+
+validator.py - Post-expansion validation reporting
+
+narrative_metrics.py - Telemetry display panel
+
+forecasting.py - Lightweight 3-chapter projection
+
+emotional_state.py - Character emotional continuity tracking
+
+I also need to update the config and data models, plus create a new main entry point or CLI extension. Let me start by defining the core data structures that everything else will depend on.
+
+Defining the thread health data model...
+
+Defining the tension model data...
+
+Defining the emotional state tracking... I'm looking at the validation report structure that checks outline adherence, emotional delta compliance, thread progression, and continuity contradictions, then I need to integrate this with the existing story_state.json from Phase 1 and leverage the model_loader.py for handling the language model interactions.
+
+I should layer Phase 2 on top of the existing codebase rather than refactoring—so I'll create a separate phase2_config.py that extends the current configuration with new settings for the validation system, state tracking, and forecasting modules.
+
+The integration flow is clear: load the user's natural language direction, pull in the existing story and thread states, generate a constrained scene-by-scene outline through the planner, display the metrics telemetry, and project forward with the forecasting system.
+
+Now I'm realizing the expansion pass is actually the chapter generation step—the user's Phase 2 spec explicitly calls for "Outline → Human Approval → Expansion," which means writing the actual chapter content based on the approved outline, then validating it against that outline before showing the validator report to the human. I need to build out the expander module since the two-pass workflow requires expanding outlines into full chapters, and the validator checks the output after expansion happens. Let me map out all the files I need to create: the Phase 2 configuration, emotional state tracking, thread health monitoring, tension modeling, outline planning, the expander itself, validation logic, metrics collection, and forecasting—then I'll start writing the code.
+
+For the emotional dimensions I'm tracking hope, fear, anger, trust, and grief. The thread health heuristics use a resolution pressure calculation based on how long a thread has gone untouched relative to its importance, with escalation kicking in when pressure builds. The tension model prevents back-to-back spikes and enforces cooldown periods between high-tension moments.
+
+Writing the core modules... I'm realizing the context window might be tight for full chapter expansion, so I should expand scene by scene instead for better control. For the arc_phase tracking, I think the best approach is to infer it from tension patterns while allowing manual overrides, since we don't know the total chapter count upfront.
+
+I'm setting up a heuristic that detects arc phases based on tension values and trends—setup when tension is low and stable, rising through the middle ranges, pre-climax as it approaches 0.8, climax when it peaks, and cooldown as it falls afterward. I'll also add an optional total_estimated_chapters to the config for better story positioning.
+
+Now I'm thinking through the outline planner structure—the LLM prompt needs to generate a JSON outline with scenes, and then the expansion step will take each scene and develop it further.
+
+Designing the CLI workflow: the user outlines a chapter with a direction, reviews the generated outline, then expands it into full prose. I'm sketching out the command structure to handle outline generation, metrics, forecasting, and expansion as separate steps.
+
+Now I'm thinking through how to initialize emotional state tracking—since Phase 1 already has character data, Phase 2 should start each character at a neutral baseline of 0.5 across emotional dimensions, then track shifts as the story progresses. Similarly, thread health needs to be derived from existing plot threads in the story state, analyzing them to set initial values before moving forward.
+
+Writing the complete implementation... After Phase 1 extraction canonizes a chapter, I need to update story_state.json and then cascade those changes to the Phase 2 state files—thread_health_state.json, tension_state.json, and emotional_state.json. I'll create an update_state command to handle this workflow.
+
+Now I'm mapping out the file structure for Phase 2, including the core modules and where the state files will live in the output directory.
+
+For the expander, I need to account for the 8K context limit carefully. A single chapter runs 1200-2000 words, and with the prompt including outline, character notes, emotional state, and context, I'm looking at around 2000-3000 tokens for setup, leaving roughly 5000 tokens for generation. I could expand scene by scene for better quality, so I'll make that configurable.
+
+The outline format should have each scene include a summary, POV character, emotional shifts, thread interactions, and tension markers.
+
+Now I'm defining the thread health heuristics with dormancy thresholds based on importance level and a resolution pressure calculation that flags threads needing attention. For escalation levels, I'm starting with introduced (no tension) and moving through increasing levels of conflict.
+
+Defining the heuristics for thread health... Writing validation logic...
+
+Now I'm ready to start implementing the actual code. For tracking emotional state, I'll use five dimensions—hope, fear, anger, trust, and grief—each ranging from 0 to 1 to capture the character's psychological arc throughout the narrative.
+
+I'm setting the maximum emotional shift per chapter at 0.3 for any dimension, though this will be configurable. If a dimension changes by more than 0.2, there needs to be a tagged event that justifies that shift.
+
+Now I'm drafting the prompt for the outline planner, which needs to guide the LLM to generate structured JSON outlines while respecting all the story constraints...
+
+Writing the JSON schema... I'm organizing the implementation plan now—I need to build out the architecture with the thread health tracker, tension model, and upgraded outline planner, then set up the validation layer and integration flow to tie everything together. Let me start writing the complete system with all the Python modules and test protocol. I'm settling on including an expander module since the validator needs to check the expanded text regardless of whether the LLM or human writes it, and this keeps the workflow flexible. Now I'm mapping out the CLI commands for the main entry point: outline generation, expansion, validation, metrics display, forecasting, and initialization from Phase 1 data, plus an update command to track progress.
+
+I'm reconsidering when Phase 2 state should update—whether it happens manually after Phase 1 extraction or gets integrated into the outline/expand workflow. I think keeping it separate is cleaner: the user generates and reviews outlines, expands them to drafts, saves the final chapter, runs Phase 1 extraction, then updates Phase 2 state to reflect the canonized content.
+
+The tricky part is deciding whether to use the planned values from the outline or extract actual values from the chapter text. Using the planned values seems more straightforward and deterministic—the validator already checks if the chapter matched the plan, so if there are gaps, the human can adjust accordingly.
+
+For the update command itself, I'll keep it simple: extract which threads were touched from the Phase 1 extraction to update thread health, pull tension and emotional state from the outline's planned values if one exists, and fall back to defaults or user input for chapters without outlines.
+
+For those initial 68+ Phase 1 chapters, I need an init command that establishes baseline thread health from the story state, sets default emotional states for all characters, and determines an initial tension level.
+
+Now I'm thinking through what context each phase needs—the outline generation should have access to current story state, thread health, tension constraints, and emotional baselines, while the expansion phase needs the approved outline, relevant retrieved chunks from Phase 1, character details, and emotional targets. The RAG integration is key here, pulling relevant context from Phase 1 to inform Phase 2.
+
+Setting up the config files... Setting up configuration constants for the narrative engine—stagnation detection windows, emotional dimensions like hope and fear, scene expansion targets, and temperature parameters for controlling randomness in generation. Now moving into the emotional state tracking module...
+
+Building the emotional state class... I'm defining a method that applies emotional shifts to characters across chapters, validating dimensions against known emotional attributes and clamping delta values to keep them within bounds.
+
+Now I'm constraining the actual dimension values to stay between 0 and 1, rounding to three decimal places, and checking if the shift magnitude exceeds a threshold that would trigger an event—flagging a warning if a large shift occurs without an associated triggering event.
+
+I'm also recording the chapter update and appending the full state change to the history with the old dimensions, new dimensions, deltas, and any triggering event, then saving the state before returning all accumulated warnings.
+
+Moving into a validation method that checks planned shifts against constraints...
+
+Validating emotional deltas...
+
+Now I'm thinking I should step back and write out all the files comprehensively rather than continue with incremental pieces. Let me reconsider the overall structure.
+
+When the system initializes after Phase 1 wraps up, I need to set up thread health from the existing story state, establish tension levels (either from user input or estimated from recent events), and initialize emotional states for all characters with defaults. The init command will handle this bootstrap process.
+
+For importing existing plot threads, each one gets mapped directly with its status, importance defaults to 3 for user customization, and I calculate chapters_since_touched based on story state updates along with other derived fields.
+
+Now I'm realizing the critical piece is understanding what happens after a chapter gets canonized—the update flow needs to be clear before I write the full implementation. I need to focus on implementation now rather than getting caught up in design details. For tracking emotional states across so many characters, I'll keep it simple—store everyone's emotional data but only surface the most important characters in the metrics display. Let me start writing out the actual code modules I'll need.
+
+I'm laying out the full module structure: configuration, emotional state tracking, thread health monitoring, tension modeling, outline generation with RAG integration from Phase 1, chapter expansion, validation, metrics display, forecasting, and the main CLI entry point. I should also document the architecture upfront.
+
+For the outline planner specifically, I need to pull in relevant context from Phase 1 using the retriever based on the story direction and active threads—that's the key connection between phases. Now I'm ready to start writing, keeping the token budget in mind for LLM prompts around the 8K limit.
+
+I'm calculating the outline prompt carefully: system instructions, story state, thread health, emotional baselines, recent events, and schema all need to fit within roughly 1500 words to stay under the token limit, leaving plenty of room for the JSON response. For scene expansion, each prompt should stay around 850 words so the model has 5000+ tokens to generate a full scene.
+
+Now I'm ready to write out the complete implementation. I need to structure this as the architecture diagram, data models, integration flow, and all the Python files, plus tests and directory layout. One critical thing: the tension model needs to enforce hard constraints in the outline planner—it should validate the outline against constraints and flag any violations rather than auto-fixing them.
+
+The flow is: tension_model provides bounds via get_bounds(), the outline planner includes those bounds in the LLM prompt, then validates the LLM's output against the constraints and returns risk_flags if anything violates them. For the init command, I also need to handle cases where we've already processed 68+ chapters—reading the story state, computing chapters_since_touched for each plot thread, and setting initial tension based on recent activity.
+
+Let me write this out cleanly now.
+
+I'm mapping out the file structure: phase2_config handles all the configuration constants, emotional_state manages character emotions with validation and history, thread_health tracks plot thread pressure and dormancy, tension_model enforces narrative constraints and computes bounds, and outline_planner ties it together by requesting bounds and validating outputs.
+
+Writing the implementation... Actually, I'm reconsidering the expander's role here. The outline should serve as a guide that users can follow to write their own chapters, but the expander can also generate draft text if they want it. The validator needs to work either way—checking LLM-generated chapters or human-written ones that get placed in the chapters directory. For human-written chapters, the validator would load both the outline and the chapter text, then use the LLM to verify adherence since that can't be done with simple rules.
+
+The user wants a "Light First" approach, so I'm thinking the validator should check outline adherence, emotional delta compliance, thread progression, and continuity. For basic checks without the LLM, I could match scene counts, thread names, character names, and key events through keyword matching. But emotional compliance is tricky without analysis. The cleanest solution is to have the LLM generate a brief assessment comparing the chapter against the outline and output a structured report—the user said "no regeneration, no correction, only report," which means the validator just analyzes and flags issues rather than fixing them.
+
+Now I'm mapping out the workflow: the outline gets saved, the human can edit the JSON directly, then they either expand it into a draft or write their own chapter using it as reference, and finally validate checks the result against the outline.
+
+Writing the validator code now... Writing the remaining modules...
+
+I'm working through the narrative metrics and forecasting logic to track story health signals and predict tension trajectories, then tying it all together in the main entry point. For initialization, I'll compute an initial tension estimate by analyzing recent event density and unresolved plot threads rather than asking the user to guess. Writing the CLI commands... I need to handle the case where a user tries to run outline before initializing Phase 2 state—I should check for those files and prompt them to run init first. Each module will gracefully handle missing state by either auto-initializing with sensible defaults or directing the user to initialize.
+
+For the outline planner, I'll integrate the retriever to pull relevant context from the FAISS index based on the user's direction—so if they mention "Alice discovers the betrayal," I can fetch related chunks about those topics to inform the planning.
+
+The expander will work scene-by-scene, with each scene targeting 300-500 words, which gives us 1200-3000 words per chapter across 4-6 scenes. I'm also thinking through what context and details should carry forward between scenes.
+
+For emotional tracking, the outline should specify per-scene emotional shifts and which characters are affected in each scene, rather than trying to track state across the entire chapter expansion.
+
+Defining the outline schema... I've got the structure locked in—I need to deliver the architecture overview, data models, core heuristics, integration flow, all ten Python modules, project layout, test protocol, and implementation order. This is going to be comprehensive but every section has a clear purpose. Let me start writing it all out now.
+
+I'm creating an ASCII diagram to map how the existing phase 1 components connect with the new phase 2 modules, showing the data flow and dependencies between the text files, config, model loading, extraction, merging, embedding, and retrieval systems alongside the new emotional state tracking, thread health monitoring, tension modeling, outline planning, expansion, and validation layers. I'm looking at the complete output directory structure now—the system generates story state files, conflict and tension tracking, processed chapters, and a Canon Bible summary, along with chapter outlines, drafts, and validation reports organized in subdirectories.
+
+Now I'm thinking through the implementation scope and realizing this is going to be substantial, probably several thousand lines across multiple files. I need to be methodical about this—starting with the configuration layer, then moving through each component file by file.
+
+I'm also recognizing that the outline planner needs to compute tension bounds from the tension model to determine what tension values are valid for the next chapter, which is a key constraint I should build in from the start.
+
+Defining the bounds computation...
+
+Now I'm weighing the tradeoffs between expanding scene-by-scene versus processing the whole chapter at once—scene-by-scene gives me finer emotional control but requires more LLM calls, while doing it all at once is faster but less precise.
+
+I'll go with scene-by-scene expansion since it lets me target emotions more carefully, and I can structure each call to include the scene outline, character baselines, relevant context chunks, the previous scene's ending for continuity, and the chapter's tension target.
+
+For handling interruptions, I'm thinking I'll just expand all scenes sequentially and save the complete draft at the end rather than tracking individual scene completion—simpler to implement and the user can always restart if needed.
+
+Now I'm building the validator to check outline adherence by confirming all planned threads appear in the text and key events from the scene summaries are present, verify emotional shifts are grounded in actual story events, ensure threads marked for advancement are addressed, and cross-reference character states against the story state to catch continuity issues like dead characters reappearing.
+
+For the LLM-based checks on the first three items, I'll structure the output as JSON similar to the extractor, while the continuity validation can use deterministic checks. I also need to make sure the outline planner has recent context—pulling the last few chapters' events from story_state along with the active characters involved in current threads.
+
+Implementing the validator now...
+
+Actually, I should finalize the emotional dimensions first. The user wants 3–5 on a 0–1 scale, so I'll go with five core dimensions: hope, fear, anger, trust, and grief. These should cover the emotional range needed for narrative planning.
+
+Phase 2 — Telemetry-Driven Two-Pass Narrative Co-Writer
+Complete implementation layered on top of Phase 1 with zero Phase 1 refactoring.
+
+Architecture Map
+text
+
+HUMAN WORKFLOW
+══════════════════════════════════════════════════════════════════════
+  ┌──────────┐    ┌──────────┐    ┌──────────┐    ┌───────────┐
+  │ Direction│───►│ Outline  │───►│ Approve/ │───►│ Expand    │
+  │ (text)   │    │ (Pass 1) │    │ Edit     │    │ (Pass 2)  │
+  └──────────┘    └────┬─────┘    └──────────┘    └─────┬─────┘
+                       │                                │
+                  ┌────▼─────────────────────────┐ ┌────▼──────┐
+                  │ Metrics / Forecast displayed │ │ Validator │
+                  └──────────────────────────────┘ └────┬──────┘
+                                                        │
+                                                   ┌────▼──────┐
+                                                   │ Report    │
+                                                   │ (human    │
+                                                   │  reviews) │
+                                                   └────┬──────┘
+                                                        │
+                                        ┌───────────────▼──────────┐
+                                        │ Phase 1 extract + merge  │
+                                        │ Phase 2 state update     │
+                                        └──────────────────────────┘
+
+MODULE DEPENDENCY GRAPH
+══════════════════════════════════════════════════════════════════════
+  phase2_config ◄──── all Phase 2 modules
+  config (P1)   ◄──── phase2_config
+
+  model_loader (P1) ◄──── outline_planner, expander, validator
+  retriever (P1)    ◄──── outline_planner, expander
+  story_state.json  ◄──── thread_health, emotional_state, validator
+
+  thread_health  ─┐
+  tension_model  ─┼──► outline_planner ──► expander
+  emotional_state─┘         │
+                            ▼
+                     narrative_metrics
+                     forecasting
+                     validator
+
+STATE FILES (output/)
+══════════════════════════════════════════════════════════════════════
+  Phase 1 (unchanged)         Phase 2 (new)
+  ─────────────────           ──────────────────────────────────
+  story_state.json            thread_health_state.json
+  conflict_log.json           tension_state.json
+  processed_chapters.json     emotional_state.json
+  index/*                     outlines/chapter_N_outline.json
+  Canon_Bible_Summary.txt     drafts/chapter_N_draft.txt
+                              validations/chapter_N_report.json
+Data Models
+text
+
+THREAD HEALTH ENTRY
+────────────────────────────────────────────────
+{
+  "thread_name":           string,
+  "status":                "active"|"resolved"|"dormant",
+  "importance":            int 1-5,
+  "chapters_since_touched": int,
+  "resolution_pressure":   float 0.0-1.0,
+  "escalation_level":      int 0-3,
+  "narrative_position":    "setup"|"escalating"|"complication"
+                           |"convergence"|"resolution_window",
+  "last_touched_chapter":  int,
+  "introduced_chapter":    int,
+  "history":               [{chapter, action, detail}]
+}
+
+TENSION STATE
+────────────────────────────────────────────────
+{
+  "current_tension":         float 0.0-1.0,
+  "arc_phase":               "setup"|"rising"|"pre_climax"
+                             |"climax"|"cooldown",
+  "chapters_since_last_spike": int,
+  "recent_trend":            "rising"|"stable"|"falling",
+  "consecutive_spikes":      int,
+  "history":                 [{chapter, tension, delta, phase}]
+}
+
+EMOTIONAL STATE (per character)
+────────────────────────────────────────────────
+{
+  "dimensions": {
+    "hope":  float 0.0-1.0,
+    "fear":  float 0.0-1.0,
+    "anger": float 0.0-1.0,
+    "trust": float 0.0-1.0,
+    "grief": float 0.0-1.0
+  },
+  "last_updated_chapter": int|null
+}
+
+OUTLINE
+────────────────────────────────────────────────
+{
+  "chapter_number": int,
+  "direction":      string (human input),
+  "opening_tension": float,
+  "closing_tension": float,
+  "scene_count":    int,
+  "scenes": [{
+    "scene_number":      int,
+    "summary":           string,
+    "pov_character":     string,
+    "setting":           string,
+    "emotional_shifts":  {char: {dim: delta}},
+    "thread_interactions": [string],
+    "tension_delta":     float,
+    "notes":             string
+  }],
+  "threads_advanced":    [string],
+  "threads_to_resolve":  [string],
+  "risk_flags":          [string],
+  "status":              "pending"|"approved"|"expanded"
+}
+
+VALIDATION REPORT
+────────────────────────────────────────────────
+{
+  "chapter_number": int,
+  "checks": {
+    "outline_adherence":        {pass, details},
+    "emotional_delta_compliance": {pass, violations},
+    "thread_progression":        {pass, details},
+    "continuity":                {pass, issues}
+  },
+  "overall_risk": "low"|"medium"|"high",
+  "timestamp":    ISO-8601
+}
+Core Heuristics (Explicit)
+text
+
+THREAD HEALTH
+─────────────────────────────────────────────────────────
+H1  dormancy_threshold(importance):
+      {5:3, 4:5, 3:8, 2:12, 1:20} chapters
+
+H2  resolution_pressure =
+      min(1.0, chapters_since_touched / (dormancy_threshold × 2))
+
+H3  narrative_position transitions:
+      setup → escalating       when escalation_level 0→1
+      escalating → complication  when escalation_level reaches 2
+      complication → convergence  when resolution_pressure > 0.6
+      convergence → resolution_window  when resolution_pressure > 0.8
+
+H4  dormancy rule:
+      if chapters_since_touched > dormancy_threshold:
+        status = "dormant"
+
+TENSION
+─────────────────────────────────────────────────────────
+T1  spike = delta > +0.15 in one chapter
+
+T2  no triple spike:
+      if last 2 chapters both spiked → max_delta capped at +0.15
+
+T3  mandatory cooldown:
+      if previous chapter phase == "climax" →
+        tension must drop ≥ 0.10
+
+T4  no stagnation:
+      if |delta| < 0.05 for 4 consecutive chapters → warning
+
+T5  no premature climax:
+      if total_history < 5 chapters → tension capped at 0.80
+
+T6  arc_phase detection:
+      tension < 0.30                       → setup
+      0.30 ≤ tension < 0.60, trend rising  → rising
+      0.60 ≤ tension < 0.80, trend rising  → pre_climax
+      tension ≥ 0.80                       → climax
+      tension dropping from ≥0.80          → cooldown
+
+EMOTIONAL
+─────────────────────────────────────────────────────────
+E1  max |delta| per dimension per chapter = 0.30
+E2  if |delta| > 0.20 → triggering_event tag required
+E3  values clamped to [0.0, 1.0]
+E4  violations are warnings, not hard blocks
+Integration Flow
+text
+
+STEP  COMMAND                              WHAT HAPPENS
+────  ─────────────────────────────────    ─────────────────────────────────
+ 0    phase2_main.py init                  Init P2 state from story_state
+ 1    phase2_main.py outline 69 "dir"      Load all state → build prompt →
+                                           LLM outline → validate constraints
+                                           → save outline → show metrics +
+                                           forecast
+ 2    (human edits outline JSON)           Manual step
+ 3    phase2_main.py expand 69             Load outline → scene-by-scene LLM
+                                           expansion with RAG context → save
+                                           draft
+ 4    (human edits draft)                  Manual step
+ 5    phase2_main.py validate 69           Compare draft vs outline → report
+ 6    (human saves final to chapters/)     Manual step
+ 7    main.py extract                      Phase 1 canonization
+ 8    phase2_main.py update 69             Update thread_health, tension,
+                                           emotional_state from outline +
+                                           extraction
+ 9    phase2_main.py metrics               View current telemetry
+10    phase2_main.py forecast              View 3-chapter projection
+Implementation
+phase2_config.py
+Python
+
+"""
+Phase 2 configuration.  Imports Phase 1 config and adds new settings.
+No Phase 1 modifications required.
+"""
+
+import os
+import config  # Phase 1 — paths, model settings, etc.
+
+# ──────────────────────────────────────────────────────────────────
+# Directories
+# ──────────────────────────────────────────────────────────────────
+OUTLINES_DIR    = os.path.join(config.OUTPUT_DIR, "outlines")
+DRAFTS_DIR      = os.path.join(config.OUTPUT_DIR, "drafts")
+VALIDATIONS_DIR = os.path.join(config.OUTPUT_DIR, "validations")
+
+for _d in (OUTLINES_DIR, DRAFTS_DIR, VALIDATIONS_DIR):
+    os.makedirs(_d, exist_ok=True)
+
+# ──────────────────────────────────────────────────────────────────
+# State files
+# ──────────────────────────────────────────────────────────────────
+THREAD_HEALTH_FILE  = os.path.join(config.OUTPUT_DIR, "thread_health_state.json")
+TENSION_STATE_FILE  = os.path.join(config.OUTPUT_DIR, "tension_state.json")
+EMOTIONAL_STATE_FILE = os.path.join(config.OUTPUT_DIR, "emotional_state.json")
+
+# ──────────────────────────────────────────────────────────────────
+# Thread health
+# ──────────────────────────────────────────────────────────────────
+DORMANCY_THRESHOLDS: dict[int, int] = {
+    5: 3,
+    4: 5,
+    3: 8,
+    2: 12,
+    1: 20,
+}
+DEFAULT_IMPORTANCE       = 3
+PRESSURE_DIVISOR         = 2.0   # pressure = since_touched / (threshold * divisor)
+CONVERGENCE_PRESSURE     = 0.6
+RESOLUTION_WINDOW_PRESSURE = 0.8
+
+# ──────────────────────────────────────────────────────────────────
+# Tension model
+# ──────────────────────────────────────────────────────────────────
+SPIKE_THRESHOLD          = 0.15
+STAGNATION_WINDOW        = 4
+STAGNATION_DELTA         = 0.05
+MIN_CHAPTERS_BEFORE_CLIMAX = 5
+COOLDOWN_MIN_DROP        = 0.10
+DEFAULT_INITIAL_TENSION  = 0.30
+
+# ──────────────────────────────────────────────────────────────────
+# Emotional model
+# ──────────────────────────────────────────────────────────────────
+EMOTIONAL_DIMENSIONS     = ("hope", "fear", "anger", "trust", "grief")
+EMOTIONAL_DEFAULT        = 0.5
+MAX_EMOTIONAL_DELTA      = 0.30
+TRIGGER_EVENT_THRESHOLD  = 0.20
+
+# ──────────────────────────────────────────────────────────────────
+# Generation
+# ──────────────────────────────────────────────────────────────────
+OUTLINE_TEMPERATURE      = 0.15
+EXPANSION_TEMPERATURE    = 0.30
+SCENE_WORD_TARGET        = 350
+VALIDATOR_TEMPERATURE    = 0.10
+
+# ──────────────────────────────────────────────────────────────────
+# Forecasting
+# ──────────────────────────────────────────────────────────────────
+FORECAST_HORIZON         = 3   # chapters ahead
+emotional_state.py
+Python
+
+"""
+Track 5 emotional dimensions per character.
+Bounded deltas.  Flag large shifts missing trigger tags.
+Pure state management — no LLM calls.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+from copy import deepcopy
+
+import phase2_config as p2
+
+
+# ──────────────────────────────────────────────────────────────────
+# Helpers
+# ──────────────────────────────────────────────────────────────────
+
+def _load(path, default=None):
+    if os.path.exists(path):
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return default if default is not None else {}
+
+
+def _save(path, data):
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+
+
+def _default_dims() -> dict[str, float]:
+    return {d: p2.EMOTIONAL_DEFAULT for d in p2.EMOTIONAL_DIMENSIONS}
+
+
+# ──────────────────────────────────────────────────────────────────
+# Public API
+# ──────────────────────────────────────────────────────────────────
+
+class EmotionalState:
+    """Manages emotional_state.json."""
+
+    def __init__(self):
+        raw = _load(p2.EMOTIONAL_STATE_FILE, {"characters": {}, "history": []})
+        self.characters: dict = raw.get("characters", {})
+        self.history: list    = raw.get("history", [])
+
+    # ── persistence ──────────────────────────────────────────────
+
+    def save(self) -> None:
+        _save(p2.EMOTIONAL_STATE_FILE,
+              {"characters": self.characters, "history": self.history})
+
+    # ── character management ─────────────────────────────────────
+
+    def ensure(self, name: str) -> None:
+        if name not in self.characters:
+            self.characters[name] = {
+                "dimensions": _default_dims(),
+                "last_updated_chapter": None,
+            }
+
+    def get_dims(self, name: str) -> dict[str, float]:
+        self.ensure(name)
+        return deepcopy(self.characters[name]["dimensions"])
+
+    def get_all_baselines(self) -> dict[str, dict[str, float]]:
+        return {n: deepcopy(c["dimensions"]) for n, c in self.characters.items()}
+
+    # ── init from Phase 1 state ──────────────────────────────────
+
+    def init_from_story_state(self, story_state: dict) -> int:
+        """Create default emotional entries for every known character.
+        Returns count of new characters added."""
+        added = 0
+        for name in story_state.get("characters", {}):
+            if name not in self.characters:
+                self.ensure(name)
+                added += 1
+        self.save()
+        return added
+
+    # ── apply shifts ─────────────────────────────────────────────
+
+    def apply_shifts(
+        self,
+        chapter: int,
+        shifts: dict[str, dict[str, float]],
+        triggering_events: dict[str, str] | None = None,
+    ) -> list[str]:
+        """Apply emotional deltas.  Returns list of warning strings."""
+        triggering_events = triggering_events or {}
+        warnings: list[str] = []
+
+        for char, dim_deltas in shifts.items():
+            self.ensure(char)
+            cd = self.characters[char]
+            old = deepcopy(cd["dimensions"])
+
+            for dim, delta in dim_deltas.items():
+                if dim not in p2.EMOTIONAL_DIMENSIONS:
+                    warnings.append(f"Unknown dimension '{dim}' for {char}")
+                    continue
+
+                # clamp delta
+                clamped = max(-p2.MAX_EMOTIONAL_DELTA,
+                              min(p2.MAX_EMOTIONAL_DELTA, delta))
+                if round(abs(clamped), 4) != round(abs(delta), 4):
+                    warnings.append(
+                        f"{char}.{dim}: delta {delta:+.2f} clamped to {clamped:+.2f}")
+
+                new_val = max(0.0, min(1.0, cd["dimensions"][dim] + clamped))
+                cd["dimensions"][dim] = round(new_val, 3)
+
+                # trigger check
+                if abs(clamped) > p2.TRIGGER_EVENT_THRESHOLD:
+                    if char not in triggering_events:
+                        warnings.append(
+                            f"{char}.{dim}: shift {clamped:+.2f} needs triggering event")
+
+            cd["last_updated_chapter"] = chapter
+
+            self.history.append({
+                "chapter": chapter,
+                "character": char,
+                "old": old,
+                "new": deepcopy(cd["dimensions"]),
+                "deltas": dim_deltas,
+                "trigger": triggering_events.get(char),
+            })
+
+        self.save()
+        return warnings
+
+    # ── validation helper ────────────────────────────────────────
+
+    def validate_planned_shifts(
+        self, shifts: dict[str, dict[str, float]]
+    ) -> tuple[bool, list[str]]:
+        """Check planned shifts against constraints.  Non-destructive."""
+        warnings: list[str] = []
+        for char, dim_deltas in shifts.items():
+            for dim, delta in dim_deltas.items():
+                if dim not in p2.EMOTIONAL_DIMENSIONS:
+                    warnings.append(f"Unknown dimension '{dim}' for {char}")
+                if abs(delta) > p2.MAX_EMOTIONAL_DELTA:
+                    warnings.append(
+                        f"{char}.{dim}: planned {delta:+.2f} exceeds ±{p2.MAX_EMOTIONAL_DELTA}")
+        return len(warnings) == 0, warnings
+thread_health.py
+Python
+
+"""
+Track plot-thread health with deterministic heuristics.
+Resolution pressure, dormancy detection, narrative-position transitions.
+No LLM calls.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+from copy import deepcopy
+
+import phase2_config as p2
+
+
+# ──────────────────────────────────────────────────────────────────
+# I/O
+# ──────────────────────────────────────────────────────────────────
+
+def _load(path, default=None):
+    if os.path.exists(path):
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return default if default is not None else {}
+
+
+def _save(path, data):
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+
+
+# ──────────────────────────────────────────────────────────────────
+# Default entry
+# ──────────────────────────────────────────────────────────────────
+
+def _new_entry(name: str, introduced: int, importance: int = None,
+               status: str = "active") -> dict:
+    return {
+        "thread_name":           name,
+        "status":                status,
+        "importance":            importance or p2.DEFAULT_IMPORTANCE,
+        "chapters_since_touched": 0,
+        "resolution_pressure":   0.0,
+        "escalation_level":      0,
+        "narrative_position":    "setup",
+        "last_touched_chapter":  introduced,
+        "introduced_chapter":    introduced,
+        "history":               [{"chapter": introduced, "action": "introduced",
+                                   "detail": ""}],
+    }
+
+
+# ──────────────────────────────────────────────────────────────────
+# Heuristic calculations
+# ──────────────────────────────────────────────────────────────────
+
+def _dormancy_threshold(importance: int) -> int:
+    return p2.DORMANCY_THRESHOLDS.get(importance, 10)
+
+
+def _calc_pressure(since: int, importance: int) -> float:
+    threshold = _dormancy_threshold(importance)
+    return round(min(1.0, since / (threshold * p2.PRESSURE_DIVISOR)), 3)
+
+
+def _update_narrative_position(entry: dict) -> None:
+    """Transition narrative_position based on escalation + pressure."""
+    esc  = entry["escalation_level"]
+    pres = entry["resolution_pressure"]
+    pos  = entry["narrative_position"]
+
+    if entry["status"] == "resolved":
+        return
+
+    if pos == "setup" and esc >= 1:
+        entry["narrative_position"] = "escalating"
+    elif pos == "escalating" and esc >= 2:
+        entry["narrative_position"] = "complication"
+    elif pos == "complication" and pres > p2.CONVERGENCE_PRESSURE:
+        entry["narrative_position"] = "convergence"
+    elif pos == "convergence" and pres > p2.RESOLUTION_WINDOW_PRESSURE:
+        entry["narrative_position"] = "resolution_window"
+
+
+# ──────────────────────────────────────────────────────────────────
+# Public API
+# ──────────────────────────────────────────────────────────────────
+
+class ThreadHealthTracker:
+    """Manages thread_health_state.json."""
+
+    def __init__(self):
+        raw = _load(p2.THREAD_HEALTH_FILE, {"threads": {}, "current_chapter": 0})
+        self.threads: dict[str, dict] = raw.get("threads", {})
+        self.current_chapter: int     = raw.get("current_chapter", 0)
+
+    def save(self) -> None:
+        _save(p2.THREAD_HEALTH_FILE,
+              {"threads": self.threads, "current_chapter": self.current_chapter})
+
+    # ── init from Phase 1 ───────────────────────────────────────
+
+    def init_from_story_state(self, story_state: dict) -> int:
+        """Import plot threads from story_state.json.  Returns count added."""
+        chapters = story_state.get("metadata", {}).get("chapters_processed", [])
+        latest = max(chapters) if chapters else 0
+        self.current_chapter = latest
+        added = 0
+
+        for tname, tdata in story_state.get("plot_threads", {}).items():
+            if tname in self.threads:
+                continue
+
+            introduced = tdata.get("introduced", 1)
+            status_raw = (tdata.get("status") or "active").lower()
+            status = "resolved" if status_raw == "resolved" else "active"
+
+            # figure out last-touched chapter from updates
+            last_ch = introduced
+            for u in tdata.get("updates", []):
+                c = u.get("chapter", 0)
+                if c > last_ch:
+                    last_ch = c
+
+            entry = _new_entry(tname, introduced, status=status)
+            entry["last_touched_chapter"] = last_ch
+            entry["chapters_since_touched"] = max(0, latest - last_ch)
+            entry["resolution_pressure"] = _calc_pressure(
+                entry["chapters_since_touched"], entry["importance"])
+
+            # estimate escalation from update count
+            n_updates = len(tdata.get("updates", []))
+            entry["escalation_level"] = min(3, n_updates // 2)
+
+            _update_narrative_position(entry)
+
+            # dormancy check
+            threshold = _dormancy_threshold(entry["importance"])
+            if entry["chapters_since_touched"] > threshold and status != "resolved":
+                entry["status"] = "dormant"
+
+            self.threads[tname] = entry
+            added += 1
+
+        self.save()
+        return added
+
+    # ── per-chapter update ───────────────────────────────────────
+
+    def advance_chapter(self, chapter: int,
+                        touched: list[str],
+                        resolved: list[str] | None = None,
+                        new_threads: list[dict] | None = None) -> list[str]:
+        """
+        Update all threads for a new chapter.
+
+        Parameters
+        ----------
+        touched   : thread names that appeared / were advanced
+        resolved  : thread names resolved this chapter
+        new_threads : list of {"name": str, "description": str, "importance": int}
+
+        Returns warnings list.
+        """
+        resolved = resolved or []
+        new_threads = new_threads or []
+        warnings: list[str] = []
+        self.current_chapter = chapter
+
+        # add new threads
+        for nt in new_threads:
+            name = nt.get("name", "").strip()
+            if not name:
+                continue
+            if name not in self.threads:
+                imp = nt.get("importance", p2.DEFAULT_IMPORTANCE)
+                self.threads[name] = _new_entry(name, chapter, importance=imp)
+
+        # update every thread
+        for tname, entry in self.threads.items():
+            if entry["status"] == "resolved":
+                # check for unexpected resurrection
+                if tname in touched and tname not in resolved:
+                    warnings.append(
+                        f"Thread '{tname}' was resolved but touched in ch {chapter}")
+                continue
+
+            if tname in touched:
+                entry["chapters_since_touched"] = 0
+                entry["last_touched_chapter"] = chapter
+                entry["history"].append(
+                    {"chapter": chapter, "action": "advanced", "detail": ""})
+                if entry["status"] == "dormant":
+                    entry["status"] = "active"
+            else:
+                entry["chapters_since_touched"] += 1
+
+            # recalculate pressure
+            entry["resolution_pressure"] = _calc_pressure(
+                entry["chapters_since_touched"], entry["importance"])
+
+            # dormancy check
+            threshold = _dormancy_threshold(entry["importance"])
+            if (entry["chapters_since_touched"] > threshold
+                    and entry["status"] == "active"):
+                entry["status"] = "dormant"
+                warnings.append(
+                    f"Thread '{tname}' (importance {entry['importance']}) "
+                    f"went dormant after {entry['chapters_since_touched']} chapters")
+
+            _update_narrative_position(entry)
+
+        # resolve threads
+        for tname in resolved:
+            if tname in self.threads:
+                self.threads[tname]["status"] = "resolved"
+                self.threads[tname]["narrative_position"] = "setup"  # reset
+                self.threads[tname]["resolution_pressure"] = 0.0
+                self.threads[tname]["history"].append(
+                    {"chapter": chapter, "action": "resolved", "detail": ""})
+
+        self.save()
+        return warnings
+
+    # ── escalation (called manually or by outline planner) ───────
+
+    def escalate(self, thread_name: str, chapter: int) -> None:
+        if thread_name in self.threads:
+            entry = self.threads[thread_name]
+            entry["escalation_level"] = min(3, entry["escalation_level"] + 1)
+            entry["history"].append(
+                {"chapter": chapter, "action": "escalated",
+                 "detail": f"→ level {entry['escalation_level']}"})
+            _update_narrative_position(entry)
+            self.save()
+
+    # ── queries ──────────────────────────────────────────────────
+
+    def get_active(self) -> list[dict]:
+        return [deepcopy(e) for e in self.threads.values()
+                if e["status"] in ("active", "dormant")]
+
+    def get_high_pressure(self, threshold: float = 0.5) -> list[dict]:
+        return sorted(
+            [deepcopy(e) for e in self.threads.values()
+             if e["resolution_pressure"] >= threshold
+             and e["status"] != "resolved"],
+            key=lambda e: -e["resolution_pressure"])
+
+    def get_dormant(self) -> list[dict]:
+        return [deepcopy(e) for e in self.threads.values()
+                if e["status"] == "dormant"]
+
+    def get_all(self) -> dict[str, dict]:
+        return deepcopy(self.threads)
+tension_model.py
+Python
+
+"""
+Track narrative tension with hard constraints.
+Deterministic arc-phase detection.  Bounds computation for planners.
+No LLM calls.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+
+import phase2_config as p2
+
+
+# ──────────────────────────────────────────────────────────────────
+# I/O
+# ──────────────────────────────────────────────────────────────────
+
+def _load(path, default=None):
+    if os.path.exists(path):
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return default
+
+
+def _save(path, data):
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+
+
+def _empty_state() -> dict:
+    return {
+        "current_tension": p2.DEFAULT_INITIAL_TENSION,
+        "arc_phase": "setup",
+        "chapters_since_last_spike": 0,
+        "recent_trend": "stable",
+        "consecutive_spikes": 0,
+        "history": [],
+    }
+
+
+# ──────────────────────────────────────────────────────────────────
+# Arc-phase heuristic (H6)
+# ──────────────────────────────────────────────────────────────────
+
+def _detect_phase(tension: float, trend: str, prev_phase: str) -> str:
+    if prev_phase == "climax" and tension < 0.80:
+        return "cooldown"
+    if prev_phase == "cooldown" and trend == "rising":
+        return "rising"            # new arc beginning
+    if tension >= 0.80:
+        return "climax"
+    if tension >= 0.60 and trend == "rising":
+        return "pre_climax"
+    if tension >= 0.30 and trend == "rising":
+        return "rising"
+    if tension < 0.30:
+        return "setup"
+    return prev_phase              # keep current if ambiguous
+
+
+def _detect_trend(history: list[dict], window: int = 3) -> str:
+    if len(history) < 2:
+        return "stable"
+    recent = history[-window:]
+    deltas = [h.get("delta", 0.0) for h in recent]
+    avg = sum(deltas) / len(deltas)
+    if avg > 0.03:
+        return "rising"
+    if avg < -0.03:
+        return "falling"
+    return "stable"
+
+
+# ──────────────────────────────────────────────────────────────────
+# Public API
+# ──────────────────────────────────────────────────────────────────
+
+class TensionTracker:
+    """Manages tension_state.json."""
+
+    def __init__(self):
+        raw = _load(p2.TENSION_STATE_FILE)
+        self.state: dict = raw if raw else _empty_state()
+
+    def save(self) -> None:
+        _save(p2.TENSION_STATE_FILE, self.state)
+
+    # ── accessors ────────────────────────────────────────────────
+
+    @property
+    def current(self) -> float:
+        return self.state["current_tension"]
+
+    @property
+    def phase(self) -> str:
+        return self.state["arc_phase"]
+
+    @property
+    def trend(self) -> str:
+        return self.state["recent_trend"]
+
+    @property
+    def history(self) -> list[dict]:
+        return self.state["history"]
+
+    # ── init ─────────────────────────────────────────────────────
+
+    def init(self, tension: float = None) -> None:
+        self.state = _empty_state()
+        if tension is not None:
+            self.state["current_tension"] = round(
+                max(0.0, min(1.0, tension)), 2)
+        self.save()
+
+    def estimate_initial_tension(self, story_state: dict) -> float:
+        """Heuristic: event density + unresolved thread ratio."""
+        events  = story_state.get("events", [])
+        threads = story_state.get("plot_threads", {})
+        chapters = story_state.get("metadata", {}).get("chapters_processed", [])
+        if not chapters:
+            return p2.DEFAULT_INITIAL_TENSION
+
+        # event density over last 5 chapters
+        last_5 = set(chapters[-5:])
+        recent  = [e for e in events if e.get("chapter") in last_5]
+        density = min(1.0, len(recent) / 10.0)
+
+        # unresolved ratio
+        unresolved = sum(1 for t in threads.values()
+                         if t.get("status") != "resolved")
+        total = max(1, len(threads))
+        pressure = unresolved / total
+
+        tension = 0.25 + 0.35 * density + 0.25 * pressure
+        return round(min(0.90, tension), 2)
+
+    # ── constraint checking ──────────────────────────────────────
+
+    def get_bounds(self) -> tuple[float, float]:
+        """Return (min_allowed, max_allowed) tension for the next chapter."""
+        cur = self.current
+        hist = self.history
+
+        lo = max(0.0, cur - 0.25)
+        hi = min(1.0, cur + 0.25)
+
+        # T2 — no triple spike
+        if len(hist) >= 2:
+            if all(h.get("delta", 0) > p2.SPIKE_THRESHOLD for h in hist[-2:]):
+                hi = min(hi, cur + p2.SPIKE_THRESHOLD)
+
+        # T3 — mandatory cooldown after climax
+        if hist and hist[-1].get("phase") == "climax":
+            hi = cur - p2.COOLDOWN_MIN_DROP
+
+        # T5 — no premature climax
+        if len(hist) < p2.MIN_CHAPTERS_BEFORE_CLIMAX:
+            hi = min(hi, 0.80)
+
+        lo = round(max(0.0, lo), 2)
+        hi = round(max(lo, min(1.0, hi)), 2)   # ensure hi ≥ lo
+        return lo, hi
+
+    def validate_planned(self, planned: float) -> tuple[bool, list[str]]:
+        """Check a planned tension value against all hard constraints."""
+        lo, hi = self.get_bounds()
+        issues: list[str] = []
+
+        if planned < lo:
+            issues.append(f"Planned tension {planned:.2f} below floor {lo:.2f}")
+        if planned > hi:
+            issues.append(f"Planned tension {planned:.2f} above ceiling {hi:.2f}")
+
+        # T4 — stagnation warning (soft)
+        if len(self.history) >= p2.STAGNATION_WINDOW:
+            recent = self.history[-p2.STAGNATION_WINDOW:]
+            if all(abs(h.get("delta", 0)) < p2.STAGNATION_DELTA for h in recent):
+                if abs(planned - self.current) < p2.STAGNATION_DELTA:
+                    issues.append(
+                        f"Stagnation: tension flat for {p2.STAGNATION_WINDOW}+ "
+                        f"chapters, planned delta still < {p2.STAGNATION_DELTA}")
+
+        return len(issues) == 0, issues
+
+    # ── recording ────────────────────────────────────────────────
+
+    def record(self, chapter: int, new_tension: float) -> list[str]:
+        """Commit a tension value.  Returns warnings."""
+        warnings: list[str] = []
+        new_tension = round(max(0.0, min(1.0, new_tension)), 3)
+        delta = round(new_tension - self.current, 3)
+
+        # spike tracking
+        is_spike = delta > p2.SPIKE_THRESHOLD
+        if is_spike:
+            self.state["consecutive_spikes"] += 1
+            self.state["chapters_since_last_spike"] = 0
+        else:
+            self.state["consecutive_spikes"] = 0
+            self.state["chapters_since_last_spike"] += 1
+
+        old_phase = self.state["arc_phase"]
+        self.state["current_tension"] = new_tension
+
+        self.state["history"].append({
+            "chapter": chapter,
+            "tension": new_tension,
+            "delta": delta,
+            "phase": old_phase,
+        })
+
+        self.state["recent_trend"] = _detect_trend(self.history)
+        self.state["arc_phase"] = _detect_phase(
+            new_tension, self.state["recent_trend"], old_phase)
+
+        # post-record warnings
+        valid, issues = self.validate_planned(new_tension)
+        warnings.extend(issues)
+
+        self.save()
+        return warnings
+outline_planner.py
+Python
+
+"""
+Two-pass planner: Pass 1.
+Builds a constrained outline prompt, calls Mistral, validates
+the result against thread-health / tension / emotional rules.
+Returns a structured outline dict with risk flags.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+
+import config
+import phase2_config as p2
+from model_loader import ModelLoader
+from thread_health import ThreadHealthTracker
+from tension_model import TensionTracker
+from emotional_state import EmotionalState
+
+
+# ──────────────────────────────────────────────────────────────────
+# I/O
+# ──────────────────────────────────────────────────────────────────
+
+def _load(path, default=None):
+    if os.path.exists(path):
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return default if default is not None else {}
+
+
+def _save(path, data):
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+
+
+def outline_path(chapter: int) -> str:
+    return os.path.join(p2.OUTLINES_DIR, f"chapter_{chapter:03d}_outline.json")
+
+
+# ──────────────────────────────────────────────────────────────────
+# Context builders
+# ──────────────────────────────────────────────────────────────────
+
+def _recent_events(story_state: dict, n: int = 5) -> str:
+    events = story_state.get("events", [])
+    if not events:
+        return "(no events recorded)"
+    tail = events[-n * 3:]          # last few chapters may each have several events
+    lines = []
+    for e in tail:
+        lines.append(f"  Ch {e.get('chapter', '?')}: {e.get('event', '')}")
+    return "\n".join(lines[-15:])   # cap at 15 lines
+
+
+def _character_summary(story_state: dict, limit: int = 12) -> str:
+    chars = story_state.get("characters", {})
+    # pick characters by number of updates (most active first)
+    ranked = sorted(chars.items(),
+                    key=lambda kv: -len(kv[1].get("updates", [])))[:limit]
+    lines = []
+    for name, c in ranked:
+        status = c.get("status", "unknown")
+        desc   = (c.get("description") or "")[:120]
+        lines.append(f"  {name} [{status}]: {desc}")
+    return "\n".join(lines) if lines else "(no characters)"
+
+
+def _thread_summary(tracker: ThreadHealthTracker) -> str:
+    active = tracker.get_active()
+    if not active:
+        return "(no active threads)"
+    lines = []
+    for t in sorted(active, key=lambda e: -e["resolution_pressure"]):
+        lines.append(
+            f"  • {t['thread_name']}  imp={t['importance']}  "
+            f"pressure={t['resolution_pressure']:.2f}  "
+            f"pos={t['narrative_position']}  "
+            f"dormant_for={t['chapters_since_touched']}ch")
+    return "\n".join(lines)
+
+
+def _emotional_summary(emo: EmotionalState) -> str:
+    baselines = emo.get_all_baselines()
+    if not baselines:
+        return "(no emotional data)"
+    lines = []
+    for name in sorted(baselines):
+        dims = baselines[name]
+        parts = [f"{d}={v:.2f}" for d, v in dims.items() if v != p2.EMOTIONAL_DEFAULT]
+        if parts:
+            lines.append(f"  {name}: {', '.join(parts)}")
+    return "\n".join(lines[:10]) if lines else "(all at baseline)"
+
+
+def _high_pressure_names(tracker: ThreadHealthTracker) -> str:
+    hp = tracker.get_high_pressure(0.4)
+    if not hp:
+        return "none"
+    return ", ".join(t["thread_name"] for t in hp[:5])
+
+
+# ──────────────────────────────────────────────────────────────────
+# Outline JSON schema shown to model
+# ──────────────────────────────────────────────────────────────────
+
+OUTLINE_SCHEMA = """{
+  "chapter_number": <int>,
+  "scene_count": <int>,
+  "opening_tension": <float>,
+  "closing_tension": <float>,
+  "scenes": [
+    {
+      "scene_number": <int>,
+      "summary": "<string>",
+      "pov_character": "<string>",
+      "setting": "<string>",
+      "emotional_shifts": {"<character>": {"<dimension>": <float delta>}},
+      "thread_interactions": ["<thread name>"],
+      "tension_delta": <float>,
+      "notes": "<string>"
+    }
+  ],
+  "threads_advanced": ["<thread name>"],
+  "threads_to_resolve": ["<thread name>"],
+  "risk_flags": ["<string>"]
+}"""
+
+
+# ──────────────────────────────────────────────────────────────────
+# Prompt builder
+# ──────────────────────────────────────────────────────────────────
+
+def _build_prompt(
+    chapter: int,
+    direction: str,
+    story_state: dict,
+    tracker: ThreadHealthTracker,
+    tension: TensionTracker,
+    emo: EmotionalState,
+    rag_context: str,
+) -> str:
+    lo, hi = tension.get_bounds()
+    return (
+        "[INST] You are a story outline planner. "
+        "Given the current story state and constraints, produce a "
+        "scene-by-scene outline for the next chapter.\n\n"
+
+        f"Chapter number: {chapter}\n"
+        f"Author direction: \"{direction}\"\n\n"
+
+        f"Current tension: {tension.current:.2f}  "
+        f"Arc phase: {tension.phase}  Trend: {tension.trend}\n"
+        f"Allowed tension range for this chapter: [{lo:.2f}, {hi:.2f}]\n\n"
+
+        "Active plot threads (sorted by pressure):\n"
+        f"{_thread_summary(tracker)}\n\n"
+
+        "Key characters:\n"
+        f"{_character_summary(story_state)}\n\n"
+
+        "Character emotional baselines (non-default only):\n"
+        f"{_emotional_summary(emo)}\n\n"
+
+        "Recent events:\n"
+        f"{_recent_events(story_state)}\n\n"
+
+        "Relevant story context:\n"
+        f"{rag_context}\n\n"
+
+        "Produce a JSON outline matching this schema:\n"
+        f"{OUTLINE_SCHEMA}\n\n"
+
+        "Rules:\n"
+        f"- closing_tension MUST be between {lo:.2f} and {hi:.2f}\n"
+        f"- Each emotional shift delta must be between -{p2.MAX_EMOTIONAL_DELTA} "
+        f"and +{p2.MAX_EMOTIONAL_DELTA}\n"
+        f"- Address at least one high-pressure thread: {_high_pressure_names(tracker)}\n"
+        "- Do NOT resolve threads unless the author direction explicitly says so\n"
+        "- 3 to 6 scenes\n"
+        "- Return ONLY the JSON object\n"
+        "[/INST]"
+    )
+
+
+# ──────────────────────────────────────────────────────────────────
+# JSON extraction (reused pattern from Phase 1)
+# ──────────────────────────────────────────────────────────────────
+
+def _extract_json(text: str) -> dict | None:
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+    m = re.search(r"\{[\s\S]*\}", text)
+    if m:
+        try:
+            return json.loads(m.group())
+        except json.JSONDecodeError:
+            pass
+    return None
+
+
+# ──────────────────────────────────────────────────────────────────
+# Post-LLM validation & risk flagging
+# ──────────────────────────────────────────────────────────────────
+
+def _validate_outline(
+    outline: dict,
+    chapter: int,
+    tension: TensionTracker,
+    emo: EmotionalState,
+) -> list[str]:
+    """Return list of risk-flag strings.  Mutates outline minimally."""
+    flags: list[str] = []
+    outline["chapter_number"] = chapter
+
+    # ── tension bounds ───────────────────────────────────────────
+    closing = outline.get("closing_tension", tension.current)
+    ok, issues = tension.validate_planned(closing)
+    flags.extend(issues)
+
+    # ── emotional checks ─────────────────────────────────────────
+    all_shifts: dict[str, dict[str, float]] = {}
+    for scene in outline.get("scenes", []):
+        for char, dims in scene.get("emotional_shifts", {}).items():
+            if char not in all_shifts:
+                all_shifts[char] = {}
+            for dim, delta in dims.items():
+                all_shifts[char][dim] = all_shifts[char].get(dim, 0) + delta
+
+    ok_e, e_issues = emo.validate_planned_shifts(all_shifts)
+    flags.extend(e_issues)
+
+    # ── scene count sanity ───────────────────────────────────────
+    scenes = outline.get("scenes", [])
+    if len(scenes) < 1:
+        flags.append("Outline has no scenes")
+    if len(scenes) > 8:
+        flags.append(f"Outline has {len(scenes)} scenes — consider trimming")
+
+    # ── merge flags from model + our flags ───────────────────────
+    existing = outline.get("risk_flags", [])
+    outline["risk_flags"] = list(set(existing + flags))
+
+    return flags
+
+
+# ──────────────────────────────────────────────────────────────────
+# Public API
+# ──────────────────────────────────────────────────────────────────
+
+def generate_outline(chapter: int, direction: str) -> dict | None:
+    """
+    Generate a constrained scene-by-scene outline.
+    Saves to outlines/ directory.  Returns the outline dict or None.
+    """
+    # Load all state
+    story_state = _load(config.STORY_STATE_FILE, {})
+    tracker     = ThreadHealthTracker()
+    tension     = TensionTracker()
+    emo         = EmotionalState()
+
+    # RAG context (best-effort; skip if index missing)
+    rag_context = "(no index available)"
+    try:
+        from retriever import Retriever
+        r = Retriever()
+        hits = r.query(direction, top_k=3)
+        if hits:
+            rag_context = "\n---\n".join(
+                f"[Ch {h['chapter']}] {h['text'][:300]}" for h in hits)
+    except FileNotFoundError:
+        pass
+
+    prompt = _build_prompt(
+        chapter, direction, story_state, tracker, tension, emo, rag_context)
+
+    # ── LLM call (retry once) ───────────────────────────────────
+    outline = None
+    for attempt in range(2):
+        if attempt:
+            print("  Retrying outline generation …")
+        raw = ModelLoader.generate(
+            prompt,
+            max_tokens=config.MODEL_MAX_TOKENS,
+            temperature=p2.OUTLINE_TEMPERATURE)
+        outline = _extract_json(raw)
+        if outline is not None:
+            break
+        print(f"  JSON parse failed (attempt {attempt + 1})")
+
+    if outline is None:
+        print("  ERROR: outline generation failed")
+        return None
+
+    # ── validate & flag ──────────────────────────────────────────
+    flags = _validate_outline(outline, chapter, tension, emo)
+
+    outline.setdefault("opening_tension", tension.current)
+    outline.setdefault("status", "pending")
+    outline["direction"] = direction
+
+    # ── save ─────────────────────────────────────────────────────
+    path = outline_path(chapter)
+    _save(path, outline)
+    print(f"  Outline saved → {path}")
+
+    if flags:
+        print(f"  ⚠ {len(flags)} risk flag(s):")
+        for f in flags:
+            print(f"    • {f}")
+
+    return outline
+
+
+def load_outline(chapter: int) -> dict | None:
+    path = outline_path(chapter)
+    if not os.path.exists(path):
+        return None
+    return _load(path)
+
+
+def approve_outline(chapter: int) -> bool:
+    path = outline_path(chapter)
+    outline = _load(path)
+    if outline is None:
+        return False
+    outline["status"] = "approved"
+    _save(path, outline)
+    return True
+expander.py
+Python
+
+"""
+Pass 2: expand an approved outline into a full chapter draft.
+Scene-by-scene LLM expansion with RAG context and emotional targets.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+
+import config
+import phase2_config as p2
+from model_loader import ModelLoader
+from emotional_state import EmotionalState
+from outline_planner import load_outline
+
+
+# ──────────────────────────────────────────────────────────────────
+# I/O
+# ──────────────────────────────────────────────────────────────────
+
+def _load(path, default=None):
+    if os.path.exists(path):
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return default if default is not None else {}
+
+
+def _save_text(path: str, text: str) -> None:
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(text)
+
+
+def draft_path(chapter: int) -> str:
+    return os.path.join(p2.DRAFTS_DIR, f"chapter_{chapter:03d}_draft.txt")
+
+
+# ──────────────────────────────────────────────────────────────────
+# Prompt builders
+# ──────────────────────────────────────────────────────────────────
+
+def _tension_description(opening: float, delta: float) -> str:
+    level = opening + delta
+    if level >= 0.8:
+        return "extremely high tension — crisis point"
+    if level >= 0.6:
+        return "high tension — urgent, pressing"
+    if level >= 0.4:
+        return "moderate tension — things are building"
+    if level >= 0.2:
+        return "low tension — reflective, measured"
+    return "very low tension — calm, establishing"
+
+
+def _emotional_targets(scene: dict, emo: EmotionalState) -> str:
+    shifts = scene.get("emotional_shifts", {})
+    if not shifts:
+        return "No specific emotional shifts this scene."
+    lines = []
+    for char, dims in shifts.items():
+        current = emo.get_dims(char)
+        parts = []
+        for dim, delta in dims.items():
+            old = current.get(dim, p2.EMOTIONAL_DEFAULT)
+            new = max(0.0, min(1.0, old + delta))
+            direction = "increase" if delta > 0 else "decrease"
+            parts.append(f"{dim}: {direction} ({old:.2f}→{new:.2f})")
+        lines.append(f"  {char}: {', '.join(parts)}")
+    return "\n".join(lines)
+
+
+def _get_rag_context(query: str, top_k: int = 2) -> str:
+    try:
+        from retriever import Retriever
+        r = Retriever()
+        hits = r.query(query, top_k=top_k)
+        if hits:
+            return "\n---\n".join(h["text"][:400] for h in hits)
+    except FileNotFoundError:
+        pass
+    return ""
+
+
+def _character_context(story_state: dict, names: list[str]) -> str:
+    chars = story_state.get("characters", {})
+    lines = []
+    for name in names:
+        if name in chars:
+            c = chars[name]
+            lines.append(
+                f"  {name} [{c.get('status','?')}]: "
+                f"{(c.get('description') or '')[:150]}")
+    return "\n".join(lines) if lines else "(no character data)"
+
+
+def _scene_prompt(
+    chapter: int,
+    scene: dict,
+    outline: dict,
+    story_state: dict,
+    emo: EmotionalState,
+    previous_ending: str,
+) -> str:
+    scene_num = scene.get("scene_number", 1)
+    total     = outline.get("scene_count", len(outline.get("scenes", [])))
+    pov       = scene.get("pov_character", "unknown")
+    setting   = scene.get("setting", "unspecified")
+    summary   = scene.get("summary", "")
+    notes     = scene.get("notes", "")
+
+    opening_t = outline.get("opening_tension", 0.5)
+    cumulative_delta = sum(
+        s.get("tension_delta", 0)
+        for s in outline.get("scenes", [])[:scene_num])
+
+    # characters mentioned in this scene
+    involved = [pov]
+    for char in scene.get("emotional_shifts", {}):
+        if char not in involved:
+            involved.append(char)
+
+    rag = _get_rag_context(summary, top_k=2)
+
+    return (
+        f"[INST] You are writing scene {scene_num} of {total} "
+        f"for Chapter {chapter}.\n\n"
+
+        f"Scene summary: {summary}\n"
+        f"POV character: {pov}\n"
+        f"Setting: {setting}\n"
+        f"Notes: {notes}\n\n"
+
+        f"Tension: {_tension_description(opening_t, cumulative_delta)}\n\n"
+
+        f"Emotional targets:\n{_emotional_targets(scene, emo)}\n\n"
+
+        f"Character context:\n{_character_context(story_state, involved)}\n\n"
+
+        + (f"Relevant story context:\n{rag}\n\n" if rag else "")
+        + (f"Previous scene ended with:\n\"{previous_ending}\"\n\n"
+           if previous_ending else "")
+        +
+        f"Write this scene in approximately {p2.SCENE_WORD_TARGET} words. "
+        f"Stay in {pov}'s perspective. "
+        f"Hit the emotional targets naturally through action and dialogue. "
+        f"Do not summarize — write full prose. "
+        f"Do not add author notes.\n\n"
+        f"Scene: [/INST]"
+    )
+
+
+# ──────────────────────────────────────────────────────────────────
+# Expansion logic
+# ──────────────────────────────────────────────────────────────────
+
+def _last_sentences(text: str, n: int = 2) -> str:
+    """Return last *n* sentences of *text*."""
+    sentences = [s.strip() for s in text.replace("\n", " ").split(".")
+                 if s.strip()]
+    return ". ".join(sentences[-n:]) + "." if sentences else ""
+
+
+def expand_chapter(chapter: int) -> str | None:
+    """
+    Expand an approved outline into a full chapter draft.
+    Saves to drafts/ directory.  Returns the full text or None.
+    """
+    outline = load_outline(chapter)
+    if outline is None:
+        print(f"  No outline found for chapter {chapter}")
+        return None
+
+    if outline.get("status") not in ("approved", "pending"):
+        print(f"  Outline status is '{outline.get('status')}' — "
+              f"expected 'approved' or 'pending'")
+        # proceed anyway — user may want to expand a pending outline
+
+    story_state = _load(config.STORY_STATE_FILE, {})
+    emo = EmotionalState()
+
+    scenes = outline.get("scenes", [])
+    if not scenes:
+        print("  Outline has no scenes")
+        return None
+
+    full_text_parts: list[str] = []
+    previous_ending = ""
+
+    for i, scene in enumerate(scenes):
+        scene_num = scene.get("scene_number", i + 1)
+        print(f"  Expanding scene {scene_num}/{len(scenes)} …")
+
+        prompt = _scene_prompt(
+            chapter, scene, outline, story_state, emo, previous_ending)
+
+        raw = ModelLoader.generate(
+            prompt,
+            max_tokens=config.MODEL_MAX_TOKENS,
+            temperature=p2.EXPANSION_TEMPERATURE,
+        )
+
+        # Clean up common LLM artifacts
+        text = raw.strip()
+        if text.startswith('"') and text.endswith('"'):
+            text = text[1:-1]
+
+        full_text_parts.append(text)
+        previous_ending = _last_sentences(text, 2)
+
+    full_draft = "\n\n---\n\n".join(full_text_parts)
+
+    # mark outline as expanded
+    outline["status"] = "expanded"
+    from outline_planner import outline_path
+    with open(outline_path(chapter), "w", encoding="utf-8") as f:
+        json.dump(outline, f, indent=2, ensure_ascii=False)
+
+    # save draft
+    path = draft_path(chapter)
+    _save_text(path, full_draft)
+    word_count = len(full_draft.split())
+    print(f"  Draft saved → {path}  ({word_count} words)")
+
+    return full_draft
+validator.py
+Python
+
+"""
+Post-expansion validation.
+Checks outline adherence, emotional compliance, thread progression,
+and continuity.  Returns a structured report.
+No regeneration.  No correction.  Only reporting.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+from datetime import datetime, timezone
+
+import config
+import phase2_config as p2
+from model_loader import ModelLoader
+from outline_planner import load_outline
+from emotional_state import EmotionalState
+from expander import draft_path
+
+
+# ──────────────────────────────────────────────────────────────────
+# I/O
+# ──────────────────────────────────────────────────────────────────
+
+def _load(path, default=None):
+    if os.path.exists(path):
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return default if default is not None else {}
+
+
+def _save(path, data):
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+
+
+def report_path(chapter: int) -> str:
+    return os.path.join(p2.VALIDATIONS_DIR,
+                        f"chapter_{chapter:03d}_report.json")
+
+
+def _read_text(path: str) -> str | None:
+    if os.path.exists(path):
+        with open(path, "r", encoding="utf-8") as f:
+            return f.read()
+    return None
+
+
+# ──────────────────────────────────────────────────────────────────
+# Deterministic checks
+# ──────────────────────────────────────────────────────────────────
+
+def _check_threads(outline: dict, chapter_text: str) -> dict:
+    """Check if threads listed in outline appear in the text."""
+    text_lower = chapter_text.lower()
+    advanced   = outline.get("threads_advanced", [])
+    details: list[str] = []
+    all_ok = True
+
+    for tname in advanced:
+        # check if thread name (or key words from it) appear in text
+        words = [w for w in tname.lower().split() if len(w) > 3]
+        found = any(w in text_lower for w in words) if words else False
+        if not found:
+            details.append(f"Thread '{tname}' planned but not clearly present in text")
+            all_ok = False
+        else:
+            details.append(f"Thread '{tname}' — present ✓")
+
+    return {"pass": all_ok, "details": details}
+
+
+def _check_emotional_bounds(outline: dict) -> dict:
+    """Check that planned emotional deltas are within bounds."""
+    violations: list[str] = []
+    for scene in outline.get("scenes", []):
+        for char, dims in scene.get("emotional_shifts", {}).items():
+            for dim, delta in dims.items():
+                if abs(delta) > p2.MAX_EMOTIONAL_DELTA:
+                    violations.append(
+                        f"Scene {scene.get('scene_number')}: "
+                        f"{char}.{dim} delta {delta:+.2f} exceeds "
+                        f"±{p2.MAX_EMOTIONAL_DELTA}")
+    return {"pass": len(violations) == 0, "violations": violations}
+
+
+def _check_continuity(chapter_text: str, story_state: dict) -> dict:
+    """Deterministic continuity checks against canon."""
+    text_lower = chapter_text.lower()
+    issues: list[str] = []
+
+    for name, cdata in story_state.get("characters", {}).items():
+        status = (cdata.get("status") or "").lower()
+        name_lower = name.lower()
+        # dead character speaking or acting
+        if status in ("dead", "deceased", "killed"):
+            # crude check: name appears in dialogue-like context
+            if name_lower in text_lower:
+                # check it's not a memory / flashback reference
+                # simple heuristic: if name appears near "said" / "asked" etc.
+                for verb in ("said", "asked", "replied", "shouted",
+                             "whispered", "walked", "ran", "grabbed"):
+                    pattern = rf"\b{re.escape(name_lower)}\b.{{0,30}}\b{verb}\b"
+                    if re.search(pattern, text_lower):
+                        issues.append(
+                            f"Character '{name}' is {status} in canon "
+                            f"but appears to act in this chapter")
+                        break
+
+    return {"pass": len(issues) == 0, "issues": issues}
+
+
+# ──────────────────────────────────────────────────────────────────
+# LLM-assisted outline adherence check
+# ──────────────────────────────────────────────────────────────────
+
+def _check_outline_adherence_llm(outline: dict, chapter_text: str) -> dict:
+    """Use LLM to assess how well the draft follows the outline."""
+    scene_summaries = "\n".join(
+        f"  Scene {s.get('scene_number', i+1)}: {s.get('summary', '?')}"
+        for i, s in enumerate(outline.get("scenes", []))
+    )
+
+    # Truncate chapter text to fit context
+    words = chapter_text.split()
+    if len(words) > 3000:
+        chapter_text = " ".join(words[:3000]) + "\n[TRUNCATED]"
+
+    prompt = (
+        "[INST] You are a story editor checking whether a chapter draft "
+        "follows its outline.\n\n"
+        f"OUTLINE SCENES:\n{scene_summaries}\n\n"
+        f"CHAPTER DRAFT:\n{chapter_text}\n\n"
+        "For each scene in the outline, state whether the draft covers it "
+        "(YES/PARTIAL/NO) and give a one-line note.\n\n"
+        "Return a JSON object:\n"
+        '{"scenes": [{"scene": <int>, "covered": "YES|PARTIAL|NO", '
+        '"note": "<string>"}], '
+        '"overall_adherence": "strong|moderate|weak"}\n\n'
+        "Return ONLY the JSON. [/INST]"
+    )
+
+    raw = ModelLoader.generate(
+        prompt, max_tokens=1024, temperature=p2.VALIDATOR_TEMPERATURE)
+
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        m = re.search(r"\{[\s\S]*\}", raw)
+        if m:
+            try:
+                data = json.loads(m.group())
+            except json.JSONDecodeError:
+                data = None
+        else:
+            data = None
+
+    if data is None:
+        return {"pass": False, "details": ["LLM adherence check failed to parse"]}
+
+    overall = data.get("overall_adherence", "unknown")
+    details = []
+    for sc in data.get("scenes", []):
+        details.append(
+            f"Scene {sc.get('scene')}: {sc.get('covered')} — {sc.get('note', '')}")
+
+    return {"pass": overall in ("strong", "moderate"), "details": details,
+            "overall_adherence": overall}
+
+
+# ──────────────────────────────────────────────────────────────────
+# Risk assessment
+# ──────────────────────────────────────────────────────────────────
+
+def _overall_risk(checks: dict) -> str:
+    fails = sum(1 for v in checks.values() if not v.get("pass", True))
+    if fails == 0:
+        return "low"
+    if fails <= 1:
+        return "medium"
+    return "high"
+
+
+# ──────────────────────────────────────────────────────────────────
+# Public API
+# ──────────────────────────────────────────────────────────────────
+
+def validate_chapter(chapter: int) -> dict | None:
+    """
+    Run all validation checks.  Returns the report dict and saves it.
+    """
+    outline = load_outline(chapter)
+    if outline is None:
+        print(f"  No outline for chapter {chapter}")
+        return None
+
+    # Try draft first, then fall back to chapters/ directory
+    chapter_text = _read_text(draft_path(chapter))
+    if chapter_text is None:
+        # look in Phase 1 chapters directory
+        import glob
+        pattern = os.path.join(config.CHAPTERS_DIR,
+                               f"*{chapter:02d}*") if chapter < 100 else \
+                  os.path.join(config.CHAPTERS_DIR, f"*{chapter}*")
+        matches = glob.glob(pattern)
+        for m in matches:
+            if m.endswith(".txt"):
+                chapter_text = _read_text(m)
+                break
+
+    if chapter_text is None:
+        print(f"  No chapter text found for chapter {chapter}")
+        return None
+
+    story_state = _load(config.STORY_STATE_FILE, {})
+
+    print(f"  Running validation on chapter {chapter} …")
+
+    checks = {}
+
+    # 1. Outline adherence (LLM)
+    print("    • Outline adherence …")
+    checks["outline_adherence"] = _check_outline_adherence_llm(
+        outline, chapter_text)
+
+    # 2. Emotional delta compliance
+    print("    • Emotional compliance …")
+    checks["emotional_delta_compliance"] = _check_emotional_bounds(outline)
+
+    # 3. Thread progression
+    print("    • Thread progression …")
+    checks["thread_progression"] = _check_threads(outline, chapter_text)
+
+    # 4. Continuity
+    print("    • Continuity …")
+    checks["continuity"] = _check_continuity(chapter_text, story_state)
+
+    risk = _overall_risk(checks)
+
+    report = {
+        "chapter_number": chapter,
+        "checks": checks,
+        "overall_risk": risk,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+
+    path = report_path(chapter)
+    _save(path, report)
+    print(f"  Report saved → {path}  (risk: {risk})")
+
+    return report
+narrative_metrics.py
+Python
+
+"""
+Visible telemetry panel.  Pure reporting — no logic, no mutations.
+Reads all Phase 2 state files and prints a formatted dashboard.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+
+import config
+import phase2_config as p2
+from thread_health import ThreadHealthTracker
+from tension_model import TensionTracker
+from emotional_state import EmotionalState
+
+
+# ──────────────────────────────────────────────────────────────────
+# Formatting helpers
+# ──────────────────────────────────────────────────────────────────
+
+def _bar(value: float, width: int = 20) -> str:
+    filled = int(round(value * width))
+    return "█" * filled + "░" * (width - filled)
+
+
+def _trend_arrow(trend: str) -> str:
+    return {"rising": "↑", "falling": "↓", "stable": "→"}.get(trend, "?")
+
+
+# ──────────────────────────────────────────────────────────────────
+# Public API
+# ──────────────────────────────────────────────────────────────────
+
+def display(planned_tension: float | None = None) -> str:
+    """Build and return the full metrics panel as a string.
+    Also prints it to stdout."""
+
+    tension = TensionTracker()
+    tracker = ThreadHealthTracker()
+    emo     = EmotionalState()
+
+    # ── story state metadata ─────────────────────────────────────
+    story_state = {}
+    if os.path.exists(config.STORY_STATE_FILE):
+        with open(config.STORY_STATE_FILE, "r", encoding="utf-8") as f:
+            story_state = json.load(f)
+    chapters_done = story_state.get("metadata", {}).get("chapters_processed", [])
+
+    lines: list[str] = []
+    lines.append("")
+    lines.append("╔══════════════════════════════════════════════════════════╗")
+    lines.append("║             N A R R A T I V E   M E T R I C S          ║")
+    lines.append("╚══════════════════════════════════════════════════════════╝")
+
+    # ── ARC PHASE ────────────────────────────────────────────────
+    lines.append("")
+    lines.append(f"  Arc Phase       : {tension.phase.upper()}")
+    lines.append(f"  Chapters Done   : {len(chapters_done)}")
+
+    # ── TENSION ──────────────────────────────────────────────────
+    lines.append("")
+    lines.append("  ── Tension ──────────────────────────────────────────")
+    lines.append(f"  Current         : {_bar(tension.current)} {tension.current:.2f}")
+    if planned_tension is not None:
+        lines.append(
+            f"  Planned         : {_bar(planned_tension)} {planned_tension:.2f}")
+    lo, hi = tension.get_bounds()
+    lines.append(f"  Allowed Range   : [{lo:.2f} – {hi:.2f}]")
+    lines.append(f"  Trend           : {_trend_arrow(tension.trend)} {tension.trend}")
+    lines.append(f"  Since Last Spike: {tension.state.get('chapters_since_last_spike', '?')} chapters")
+    lines.append(f"  Consec. Spikes  : {tension.state.get('consecutive_spikes', 0)}")
+
+    # ── THREAD HEALTH TABLE ──────────────────────────────────────
+    lines.append("")
+    lines.append("  ── Thread Health ────────────────────────────────────")
+    lines.append(f"  {'Thread':<28} {'Imp':>3} {'Pres':>5} {'Dorm':>5} "
+                 f"{'Esc':>3} {'Position':<18} {'Status':<8}")
+    lines.append("  " + "─" * 80)
+
+    all_threads = tracker.get_all()
+    sorted_threads = sorted(all_threads.values(),
+                            key=lambda t: (-t["importance"],
+                                           -t["resolution_pressure"]))
+    for t in sorted_threads:
+        name = t["thread_name"][:27]
+        lines.append(
+            f"  {name:<28} {t['importance']:>3} "
+            f"{t['resolution_pressure']:>5.2f} "
+            f"{t['chapters_since_touched']:>5} "
+            f"{t['escalation_level']:>3} "
+            f"{t['narrative_position']:<18} "
+            f"{t['status']:<8}")
+
+    dormant = tracker.get_dormant()
+    if dormant:
+        lines.append(f"\n  ⚠ {len(dormant)} dormant thread(s)")
+
+    # ── EMOTIONAL SHIFT SUMMARY ──────────────────────────────────
+    lines.append("")
+    lines.append("  ── Emotional Baselines (non-default) ────────────────")
+    baselines = emo.get_all_baselines()
+    shown = 0
+    for name in sorted(baselines):
+        dims = baselines[name]
+        non_default = {d: v for d, v in dims.items()
+                       if abs(v - p2.EMOTIONAL_DEFAULT) > 0.02}
+        if non_default:
+            parts = [f"{d}={v:.2f}" for d, v in non_default.items()]
+            lines.append(f"  {name:<24} {', '.join(parts)}")
+            shown += 1
+            if shown >= 15:
+                lines.append(f"  … and {len(baselines) - shown} more")
+                break
+    if shown == 0:
+        lines.append("  (all characters at baseline)")
+
+    # ── SCENE COUNT from latest outline ──────────────────────────
+    lines.append("")
+    latest_outline = None
+    if chapters_done:
+        next_ch = max(chapters_done) + 1
+        opath = os.path.join(p2.OUTLINES_DIR,
+                             f"chapter_{next_ch:03d}_outline.json")
+        if os.path.exists(opath):
+            with open(opath, "r") as f:
+                latest_outline = json.load(f)
+    if latest_outline:
+        lines.append(
+            f"  Latest Outline  : Chapter {latest_outline.get('chapter_number')}")
+        lines.append(
+            f"  Scene Count     : {latest_outline.get('scene_count', '?')}")
+        flags = latest_outline.get("risk_flags", [])
+        lines.append(f"  Risk Flags      : {len(flags)}")
+        for fl in flags[:5]:
+            lines.append(f"    • {fl}")
+
+    # ── CONTINUITY RISK ──────────────────────────────────────────
+    conflict_log = []
+    if os.path.exists(config.CONFLICT_LOG_FILE):
+        with open(config.CONFLICT_LOG_FILE, "r") as f:
+            conflict_log = json.load(f)
+    lines.append("")
+    lines.append(f"  Continuity Risk : {len(conflict_log)} conflict(s) logged")
+    if conflict_log:
+        for c in conflict_log[-3:]:
+            lines.append(f"    Ch {c.get('chapter','?')}: {c.get('detail','')[:70]}")
+
+    lines.append("")
+    lines.append("═" * 60)
+
+    output = "\n".join(lines)
+    print(output)
+    return output
+forecasting.py
+Python
+
+"""
+Lightweight 3-chapter projection.
+Tension trajectory, escalating threads, resolution pressure,
+collision probability.  Pure heuristics — no LLM calls.
+"""
+
+from __future__ import annotations
+
+from copy import deepcopy
+
+import phase2_config as p2
+from thread_health import ThreadHealthTracker
+from tension_model import TensionTracker
+
+
+# ──────────────────────────────────────────────────────────────────
+# Projection helpers
+# ──────────────────────────────────────────────────────────────────
+
+def _project_tension(tracker: TensionTracker, horizon: int) -> list[dict]:
+    """Project tension values by extending recent trend."""
+    current = tracker.current
+    trend   = tracker.trend
+    hist    = tracker.history
+
+    # average delta over last 3 data points
+    recent_deltas = [h.get("delta", 0) for h in hist[-3:]] if hist else [0]
+    avg_delta = sum(recent_deltas) / len(recent_deltas)
+
+    projections = []
+    t = current
+    for i in range(1, horizon + 1):
+        t = round(max(0.0, min(1.0, t + avg_delta)), 3)
+        phase = tracker.state["arc_phase"]  # simplified — keep current phase
+        if t >= 0.80:
+            phase = "climax"
+        elif t >= 0.60:
+            phase = "pre_climax"
+        elif t < 0.30:
+            phase = "setup"
+        projections.append({
+            "chapter_offset": i,
+            "projected_tension": t,
+            "projected_phase": phase,
+            "delta_used": round(avg_delta, 3),
+        })
+    return projections
+
+
+def _project_threads(
+    tracker: ThreadHealthTracker, horizon: int
+) -> dict[str, list[dict]]:
+    """Project thread pressure forward."""
+    escalating:  list[dict] = []
+    nearing_res: list[dict] = []
+    all_threads = tracker.get_all()
+
+    for tname, entry in all_threads.items():
+        if entry["status"] == "resolved":
+            continue
+
+        imp  = entry["importance"]
+        since = entry["chapters_since_touched"]
+        threshold = p2.DORMANCY_THRESHOLDS.get(imp, 10)
+
+        # project pressure at each future chapter
+        future_pressures = []
+        for i in range(1, horizon + 1):
+            future_since = since + i
+            pres = min(1.0, future_since / (threshold * p2.PRESSURE_DIVISOR))
+            future_pressures.append(round(pres, 3))
+
+        # will it escalate? (pressure crosses 0.6)
+        if entry["resolution_pressure"] < 0.6 and any(p >= 0.6 for p in future_pressures):
+            ch_offset = next(i + 1 for i, p in enumerate(future_pressures) if p >= 0.6)
+            escalating.append({
+                "thread": tname,
+                "importance": imp,
+                "current_pressure": entry["resolution_pressure"],
+                "escalates_in": ch_offset,
+            })
+
+        # nearing forced resolution (pressure > 0.85)
+        if any(p >= 0.85 for p in future_pressures):
+            ch_offset = next(i + 1 for i, p in enumerate(future_pressures) if p >= 0.85)
+            nearing_res.append({
+                "thread": tname,
+                "importance": imp,
+                "current_pressure": entry["resolution_pressure"],
+                "critical_in": ch_offset,
+            })
+
+    return {"escalating": escalating, "nearing_resolution": nearing_res}
+
+
+def _collision_probability(tracker: ThreadHealthTracker, horizon: int) -> dict:
+    """
+    Detect if multiple high-importance threads will need attention
+    in the same window — a narrative collision risk.
+    """
+    threads = tracker.get_all()
+    # count how many high-importance threads (>=4) are at pressure >= 0.5
+    # and will cross 0.7 within the horizon
+    hotspots: dict[int, list[str]] = {}  # offset → [thread names]
+
+    for tname, entry in threads.items():
+        if entry["status"] == "resolved":
+            continue
+        if entry["importance"] < 3:
+            continue
+
+        since = entry["chapters_since_touched"]
+        threshold = p2.DORMANCY_THRESHOLDS.get(entry["importance"], 10)
+
+        for i in range(1, horizon + 1):
+            pres = min(1.0, (since + i) / (threshold * p2.PRESSURE_DIVISOR))
+            if pres >= 0.7:
+                hotspots.setdefault(i, []).append(tname)
+                break
+
+    collisions = {offset: names for offset, names in hotspots.items()
+                  if len(names) >= 2}
+
+    if collisions:
+        worst = max(collisions.items(), key=lambda kv: len(kv[1]))
+        return {
+            "risk": "high" if len(worst[1]) >= 3 else "moderate",
+            "details": collisions,
+            "note": (f"{len(worst[1])} threads converge around "
+                     f"+{worst[0]} chapter(s)"),
+        }
+    return {"risk": "low", "details": {}, "note": "No collisions detected"}
+
+
+# ──────────────────────────────────────────────────────────────────
+# Public API
+# ──────────────────────────────────────────────────────────────────
+
+def forecast(horizon: int | None = None) -> dict:
+    """
+    Generate a lightweight projection.  Returns structured dict and
+    prints a human-readable summary.
+    """
+    horizon = horizon or p2.FORECAST_HORIZON
+    tension = TensionTracker()
+    tracker = ThreadHealthTracker()
+
+    ten_proj  = _project_tension(tension, horizon)
+    thr_proj  = _project_threads(tracker, horizon)
+    collision = _collision_probability(tracker, horizon)
+
+    result = {
+        "horizon": horizon,
+        "tension_trajectory": ten_proj,
+        "thread_projections": thr_proj,
+        "collision_risk": collision,
+    }
+
+    # ── pretty print ─────────────────────────────────────────────
+    print()
+    print("╔══════════════════════════════════════════════════════════╗")
+    print(f"║          F O R E C A S T   ({horizon}-chapter horizon)           ║")
+    print("╚══════════════════════════════════════════════════════════╝")
+
+    print("\n  ── Tension Trajectory ──")
+    for tp in ten_proj:
+        print(f"    +{tp['chapter_offset']} ch:  {tp['projected_tension']:.2f}  "
+              f"({tp['projected_phase']})")
+
+    print("\n  ── Threads Likely to Escalate ──")
+    esc = thr_proj["escalating"]
+    if esc:
+        for e in esc:
+            print(f"    • {e['thread']} (imp={e['importance']}, "
+                  f"pressure={e['current_pressure']:.2f}) → "
+                  f"escalates in {e['escalates_in']} ch")
+    else:
+        print("    (none)")
+
+    print("\n  ── Threads Nearing Forced Resolution ──")
+    nr = thr_proj["nearing_resolution"]
+    if nr:
+        for n in nr:
+            print(f"    ⚠ {n['thread']} (imp={n['importance']}, "
+                  f"pressure={n['current_pressure']:.2f}) → "
+                  f"critical in {n['critical_in']} ch")
+    else:
+        print("    (none)")
+
+    print(f"\n  ── Collision Risk: {collision['risk'].upper()} ──")
+    print(f"    {collision['note']}")
+    if collision["details"]:
+        for offset, names in collision["details"].items():
+            print(f"    +{offset} ch: {', '.join(names)}")
+
+    print()
+    return result
+
+
+Completing everything from the `forecast` command forward — the full remainder of `phase2_main.py`, updated project layout, test protocol, and implementation plan.
+
+---
+
+## `phase2_main.py` (complete file)
+
+```python
+#!/usr/bin/env python3
+"""
+Phase 2 CLI entry point.
+
+Commands
+--------
+  python phase2_main.py init                         Initialise Phase 2 state
+  python phase2_main.py outline <ch> "<direction>"   Generate outline (Pass 1)
+  python phase2_main.py approve <ch>                 Mark outline as approved
+  python phase2_main.py expand  <ch>                 Expand outline to draft (Pass 2)
+  python phase2_main.py validate <ch>                Validate chapter vs outline
+  python phase2_main.py update  <ch>                 Update P2 state after canonisation
+  python phase2_main.py metrics                      Show narrative telemetry
+  python phase2_main.py forecast                     Show 3-chapter projection
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import sys
+import time
+
+import config
+
+
+# ──────────────────────────────────────────────────────────────────
+# init
+# ──────────────────────────────────────────────────────────────────
+
+def cmd_init():
+    """Initialise Phase 2 state from existing Phase 1 data."""
+    from thread_health import ThreadHealthTracker
+    from tension_model import TensionTracker
+    from emotional_state import EmotionalState
+
+    if not os.path.exists(config.STORY_STATE_FILE):
+        print("No story_state.json found. Run Phase 1 'extract' first.")
+        return
+
+    with open(config.STORY_STATE_FILE, "r") as f:
+        story_state = json.load(f)
+
+    # Thread health
+    tracker = ThreadHealthTracker()
+    added = tracker.init_from_story_state(story_state)
+    print(f"[init] Thread health: {added} threads imported, "
+          f"{len(tracker.threads)} total")
+
+    # Tension
+    tension = TensionTracker()
+    initial = tension.estimate_initial_tension(story_state)
+    tension.init(initial)
+    print(f"[init] Tension initialised at {initial:.2f}")
+
+    # Emotional state
+    emo = EmotionalState()
+    added_e = emo.init_from_story_state(story_state)
+    print(f"[init] Emotional state: {added_e} characters initialised, "
+          f"{len(emo.characters)} total")
+
+    print("[init] Done.  Review state files in output/ and adjust if needed.")
+
+
+# ──────────────────────────────────────────────────────────────────
+# outline
+# ──────────────────────────────────────────────────────────────────
+
+def cmd_outline(chapter: int, direction: str):
+    from outline_planner import generate_outline
+    from narrative_metrics import display
+    from forecasting import forecast as run_forecast
+
+    print(f"\n━━━ Generating Outline: Chapter {chapter} ━━━")
+    print(f"  Direction: \"{direction}\"\n")
+
+    t0 = time.time()
+    outline = generate_outline(chapter, direction)
+    dt = time.time() - t0
+
+    if outline is None:
+        print("  FAILED — no outline produced.")
+        return
+
+    print(f"\n  Generated in {dt:.1f}s")
+    print(f"  Scenes: {outline.get('scene_count', '?')}")
+    print(f"  Closing tension: {outline.get('closing_tension', '?')}")
+    print(f"  Threads advanced: {outline.get('threads_advanced', [])}")
+    print(f"  Status: {outline.get('status', '?')}")
+
+    # show scenes
+    for scene in outline.get("scenes", []):
+        sn = scene.get("scene_number", "?")
+        print(f"\n  Scene {sn}: {scene.get('summary', '')[:100]}")
+        print(f"    POV: {scene.get('pov_character', '?')}  "
+              f"Setting: {scene.get('setting', '?')}  "
+              f"Δtension: {scene.get('tension_delta', 0):+.2f}")
+        shifts = scene.get("emotional_shifts", {})
+        if shifts:
+            for char, dims in shifts.items():
+                parts = [f"{d}{v:+.2f}" for d, v in dims.items()]
+                print(f"    Emo: {char} → {', '.join(parts)}")
+
+    # display metrics and forecast
+    display(planned_tension=outline.get("closing_tension"))
+    run_forecast()
+
+    print("\n  → Review the outline JSON, edit if needed, then run:")
+    print(f"    python phase2_main.py approve {chapter}")
+    print(f"    python phase2_main.py expand  {chapter}")
+
+
+# ──────────────────────────────────────────────────────────────────
+# approve
+# ──────────────────────────────────────────────────────────────────
+
+def cmd_approve(chapter: int):
+    from outline_planner import approve_outline
+    if approve_outline(chapter):
+        print(f"  ✓ Outline for chapter {chapter} marked as approved")
+    else:
+        print(f"  ✗ No outline found for chapter {chapter}")
+
+
+# ──────────────────────────────────────────────────────────────────
+# expand
+# ──────────────────────────────────────────────────────────────────
+
+def cmd_expand(chapter: int):
+    from expander import expand_chapter
+
+    print(f"\n━━━ Expanding Chapter {chapter} ━━━\n")
+    t0 = time.time()
+    draft = expand_chapter(chapter)
+    dt = time.time() - t0
+
+    if draft is None:
+        print("  FAILED — no draft produced.")
+        return
+
+    print(f"\n  Expansion complete in {dt:.1f}s")
+    print(f"  Word count: {len(draft.split())}")
+    print("  → Review the draft, edit if needed, then run:")
+    print(f"    python phase2_main.py validate {chapter}")
+
+
+# ──────────────────────────────────────────────────────────────────
+# validate
+# ──────────────────────────────────────────────────────────────────
+
+def cmd_validate(chapter: int):
+    from validator import validate_chapter
+
+    print(f"\n━━━ Validating Chapter {chapter} ━━━\n")
+    report = validate_chapter(chapter)
+
+    if report is None:
+        return
+
+    print(f"\n  Overall Risk: {report['overall_risk'].upper()}")
+    for check_name, check_data in report["checks"].items():
+        status = "✓ PASS" if check_data.get("pass") else "✗ FAIL"
+        print(f"\n  {check_name}: {status}")
+        for key in ("details", "violations", "issues"):
+            items = check_data.get(key, [])
+            for item in items:
+                print(f"    {item}")
+
+
+# ──────────────────────────────────────────────────────────────────
+# update (after Phase 1 canonisation)
+# ──────────────────────────────────────────────────────────────────
+
+def cmd_update(chapter: int):
+    """Update Phase 2 state after Phase 1 has canonised a chapter."""
+    from thread_health import ThreadHealthTracker
+    from tension_model import TensionTracker
+    from emotional_state import EmotionalState
+    from outline_planner import load_outline
+
+    print(f"\n━━━ Updating Phase 2 State: Chapter {chapter} ━━━\n")
+
+    story_state = {}
+    if os.path.exists(config.STORY_STATE_FILE):
+        with open(config.STORY_STATE_FILE, "r") as f:
+            story_state = json.load(f)
+
+    outline = load_outline(chapter)
+
+    # ── Thread health ────────────────────────────────────────────
+    tracker = ThreadHealthTracker()
+
+    # Determine touched threads from outline or from Phase 1 extraction
+    touched: list[str] = []
+    resolved: list[str] = []
+    new_threads: list[dict] = []
+
+    if outline:
+        touched = list(outline.get("threads_advanced", []))
+        resolved = list(outline.get("threads_to_resolve", []))
+
+    # Also check Phase 1 extraction for new threads
+    for tname, tdata in story_state.get("plot_threads", {}).items():
+        if tname not in tracker.threads:
+            new_threads.append({"name": tname, "importance": 3})
+        # check if this thread was updated at this chapter
+        for u in tdata.get("updates", []):
+            if u.get("chapter") == chapter and tname not in touched:
+                touched.append(tname)
+        if tdata.get("status") == "resolved" and tname not in resolved:
+            for u in tdata.get("updates", []):
+                if (u.get("chapter") == chapter
+                        and "resolved" in u.get("detail", "").lower()):
+                    resolved.append(tname)
+
+    warnings = tracker.advance_chapter(chapter, touched, resolved, new_threads)
+    print(f"  Threads: {len(touched)} touched, {len(resolved)} resolved, "
+          f"{len(new_threads)} new")
+    for w in warnings:
+        print(f"    ⚠ {w}")
+
+    # ── Tension ──────────────────────────────────────────────────
+    tension = TensionTracker()
+    if outline and "closing_tension" in outline:
+        new_tension = outline["closing_tension"]
+    else:
+        # estimate from event count this chapter
+        events = [e for e in story_state.get("events", [])
+                  if e.get("chapter") == chapter]
+        delta = min(0.1, len(events) * 0.03)
+        new_tension = round(tension.current + delta, 2)
+        print(f"  Tension: no outline — estimated delta +{delta:.2f}")
+
+    t_warnings = tension.record(chapter, new_tension)
+    print(f"  Tension: {tension.current:.2f}  Phase: {tension.phase}")
+    for w in t_warnings:
+        print(f"    ⚠ {w}")
+
+    # ── Emotional state ──────────────────────────────────────────
+    emo = EmotionalState()
+
+    # Add any new characters from Phase 1
+    for name in story_state.get("characters", {}):
+        emo.ensure(name)
+
+    if outline:
+        # Aggregate emotional shifts from all scenes
+        all_shifts: dict[str, dict[str, float]] = {}
+        triggers: dict[str, str] = {}
+        for scene in outline.get("scenes", []):
+            for char, dims in scene.get("emotional_shifts", {}).items():
+                if char not in all_shifts:
+                    all_shifts[char] = {}
+                for dim, delta in dims.items():
+                    all_shifts[char][dim] = (
+                        all_shifts[char].get(dim, 0) + delta)
+            # use scene summary as trigger
+            for char in scene.get("emotional_shifts", {}):
+                triggers[char] = scene.get("summary", "")[:100]
+
+        if all_shifts:
+            e_warnings = emo.apply_shifts(chapter, all_shifts, triggers)
+            print(f"  Emotional: {len(all_shifts)} character(s) updated")
+            for w in e_warnings:
+                print(f"    ⚠ {w}")
+        else:
+            print("  Emotional: no shifts in outline")
+    else:
+        print("  Emotional: no outline — skipping emotional update")
+
+    emo.save()
+    print(f"\n  ✓ Phase 2 state updated for chapter {chapter}")
+
+
+# ──────────────────────────────────────────────────────────────────
+# metrics
+# ──────────────────────────────────────────────────────────────────
+
+def cmd_metrics():
+    from narrative_metrics import display
+    display()
+
+
+# ──────────────────────────────────────────────────────────────────
+# forecast
+# ──────────────────────────────────────────────────────────────────
+
+def cmd_forecast():
+    from forecasting import forecast as run_forecast
+    run_forecast()
+
+
+# ──────────────────────────────────────────────────────────────────
+# inspect — dump raw state for debugging
+# ──────────────────────────────────────────────────────────────────
+
+def cmd_inspect(target: str):
+    """Dump a Phase 2 state file to stdout for manual review."""
+    import phase2_config as p2
+
+    targets = {
+        "threads":   p2.THREAD_HEALTH_FILE,
+        "tension":   p2.TENSION_STATE_FILE,
+        "emotional": p2.EMOTIONAL_STATE_FILE,
+        "story":     config.STORY_STATE_FILE,
+        "conflicts": config.CONFLICT_LOG_FILE,
+    }
+
+    path = targets.get(target)
+    if path is None:
+        print(f"Unknown target '{target}'.  Choose from: {', '.join(targets)}")
+        return
+
+    if not os.path.exists(path):
+        print(f"File not found: {path}")
+        return
+
+    with open(path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    print(json.dumps(data, indent=2, ensure_ascii=False))
+
+
+# ──────────────────────────────────────────────────────────────────
+# set — manual overrides for tuning state
+# ──────────────────────────────────────────────────────────────────
+
+def cmd_set_tension(value: float):
+    """Override the current tension value."""
+    from tension_model import TensionTracker
+
+    tension = TensionTracker()
+    old = tension.current
+    tension.state["current_tension"] = round(max(0.0, min(1.0, value)), 3)
+    tension.save()
+    print(f"  Tension: {old:.3f} → {tension.current:.3f}")
+
+
+def cmd_set_importance(thread_name: str, importance: int):
+    """Override the importance of a thread."""
+    from thread_health import ThreadHealthTracker
+
+    tracker = ThreadHealthTracker()
+    if thread_name not in tracker.threads:
+        # try partial match
+        matches = [t for t in tracker.threads if thread_name.lower() in t.lower()]
+        if len(matches) == 1:
+            thread_name = matches[0]
+        elif matches:
+            print(f"  Ambiguous match: {matches}")
+            return
+        else:
+            print(f"  Thread '{thread_name}' not found")
+            return
+
+    importance = max(1, min(5, importance))
+    old = tracker.threads[thread_name]["importance"]
+    tracker.threads[thread_name]["importance"] = importance
+    tracker.save()
+    print(f"  '{thread_name}' importance: {old} → {importance}")
+
+
+def cmd_set_emotion(character: str, dimension: str, value: float):
+    """Override a single emotional dimension for a character."""
+    from emotional_state import EmotionalState
+    import phase2_config as p2
+
+    if dimension not in p2.EMOTIONAL_DIMENSIONS:
+        print(f"  Unknown dimension '{dimension}'.  "
+              f"Choose from: {', '.join(p2.EMOTIONAL_DIMENSIONS)}")
+        return
+
+    emo = EmotionalState()
+    emo.ensure(character)
+    old = emo.characters[character]["dimensions"][dimension]
+    emo.characters[character]["dimensions"][dimension] = round(
+        max(0.0, min(1.0, value)), 3)
+    emo.save()
+    print(f"  {character}.{dimension}: {old:.3f} → {value:.3f}")
+
+
+# ──────────────────────────────────────────────────────────────────
+# main
+# ──────────────────────────────────────────────────────────────────
+
+USAGE = """\
+Phase 2 — Narrative Co-Writer CLI
+
+Core workflow:
+  python phase2_main.py init                          Initialise from Phase 1
+  python phase2_main.py outline <ch> "<direction>"    Generate outline (Pass 1)
+  python phase2_main.py approve <ch>                  Approve outline for expansion
+  python phase2_main.py expand  <ch>                  Expand to draft (Pass 2)
+  python phase2_main.py validate <ch>                 Validate draft vs outline
+  python phase2_main.py update  <ch>                  Update state post-canonisation
+
+Telemetry:
+  python phase2_main.py metrics                       Show narrative dashboard
+  python phase2_main.py forecast                      Show 3-chapter projection
+
+Debugging:
+  python phase2_main.py inspect <threads|tension|emotional|story|conflicts>
+  python phase2_main.py set_tension <0.0–1.0>
+  python phase2_main.py set_importance "<thread>" <1–5>
+  python phase2_main.py set_emotion "<character>" <dimension> <0.0–1.0>
+"""
+
+
+def _require_int(arg: str, name: str) -> int:
+    try:
+        return int(arg)
+    except ValueError:
+        print(f"Error: {name} must be an integer, got '{arg}'")
+        sys.exit(1)
+
+
+def _require_float(arg: str, name: str) -> float:
+    try:
+        return float(arg)
+    except ValueError:
+        print(f"Error: {name} must be a number, got '{arg}'")
+        sys.exit(1)
+
+
+def _check_p2_state():
+    """Warn if Phase 2 state hasn't been initialised."""
+    import phase2_config as p2
+    needed = [p2.THREAD_HEALTH_FILE, p2.TENSION_STATE_FILE, p2.EMOTIONAL_STATE_FILE]
+    missing = [f for f in needed if not os.path.exists(f)]
+    if missing:
+        print("  ⚠ Phase 2 state files missing.  Run 'init' first:")
+        for f in missing:
+            print(f"    {f}")
+        print()
+        return False
+    return True
+
+
+def main():
+    if len(sys.argv) < 2:
+        print(USAGE)
+        sys.exit(1)
+
+    cmd = sys.argv[1].lower()
+
+    # ── commands that don't need P2 state ────────────────────────
+    if cmd == "init":
+        cmd_init()
+        return
+
+    if cmd == "inspect":
+        if len(sys.argv) < 3:
+            print("Usage: phase2_main.py inspect <threads|tension|emotional|story|conflicts>")
+            sys.exit(1)
+        cmd_inspect(sys.argv[2].lower())
+        return
+
+    # ── commands that need P2 state ──────────────────────────────
+    if cmd not in ("set_tension", "set_importance", "set_emotion"):
+        if not _check_p2_state():
+            print("  Run:  python phase2_main.py init")
+            sys.exit(1)
+
+    if cmd == "outline":
+        if len(sys.argv) < 4:
+            print('Usage: phase2_main.py outline <chapter_number> "<direction>"')
+            sys.exit(1)
+        ch = _require_int(sys.argv[2], "chapter_number")
+        direction = " ".join(sys.argv[3:])
+        cmd_outline(ch, direction)
+
+    elif cmd == "approve":
+        if len(sys.argv) < 3:
+            print("Usage: phase2_main.py approve <chapter_number>")
+            sys.exit(1)
+        cmd_approve(_require_int(sys.argv[2], "chapter_number"))
+
+    elif cmd == "expand":
+        if len(sys.argv) < 3:
+            print("Usage: phase2_main.py expand <chapter_number>")
+            sys.exit(1)
+        cmd_expand(_require_int(sys.argv[2], "chapter_number"))
+
+    elif cmd == "validate":
+        if len(sys.argv) < 3:
+            print("Usage: phase2_main.py validate <chapter_number>")
+            sys.exit(1)
+        cmd_validate(_require_int(sys.argv[2], "chapter_number"))
+
+    elif cmd == "update":
+        if len(sys.argv) < 3:
+            print("Usage: phase2_main.py update <chapter_number>")
+            sys.exit(1)
+        cmd_update(_require_int(sys.argv[2], "chapter_number"))
+
+    elif cmd == "metrics":
+        cmd_metrics()
+
+    elif cmd == "forecast":
+        cmd_forecast()
+
+    elif cmd == "set_tension":
+        if len(sys.argv) < 3:
+            print("Usage: phase2_main.py set_tension <value>")
+            sys.exit(1)
+        cmd_set_tension(_require_float(sys.argv[2], "tension"))
+
+    elif cmd == "set_importance":
+        if len(sys.argv) < 4:
+            print('Usage: phase2_main.py set_importance "<thread_name>" <1-5>')
+            sys.exit(1)
+        cmd_set_importance(sys.argv[2], _require_int(sys.argv[3], "importance"))
+
+    elif cmd == "set_emotion":
+        if len(sys.argv) < 5:
+            print('Usage: phase2_main.py set_emotion "<character>" <dimension> <0.0-1.0>')
+            sys.exit(1)
+        cmd_set_emotion(sys.argv[2], sys.argv[3],
+                        _require_float(sys.argv[4], "value"))
+
+    else:
+        print(f"Unknown command: {cmd}\n")
+        print(USAGE)
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
+```
+
+---
+
+## Complete Project Layout
+
+```
+canon_engine/
+│
+├── chapters/                           ← your 68+ chapter .txt files
+│   ├── chapter_01.txt
+│   ├── chapter_02.txt
+│   └── …
+│
+├── models/
+│   └── mistral-7b-instruct-v0.2.Q4_K_M.gguf
+│
+├── output/                             ← all generated state (gitignore-friendly)
+│   ├── story_state.json                ← Phase 1 canon
+│   ├── conflict_log.json               ← Phase 1 contradictions
+│   ├── processed_chapters.json         ← Phase 1 progress gate
+│   ├── Canon_Bible_Summary.txt         ← Phase 1 summary
+│   │
+│   ├── thread_health_state.json        ← Phase 2 thread tracker
+│   ├── tension_state.json              ← Phase 2 tension tracker
+│   ├── emotional_state.json            ← Phase 2 emotional tracker
+│   │
+│   ├── index/                          ← FAISS index (Phase 1)
+│   │   ├── chapters.index
+│   │   └── chunks_metadata.json
+│   │
+│   ├── outlines/                       ← Phase 2 outlines
+│   │   ├── chapter_069_outline.json
+│   │   └── …
+│   │
+│   ├── drafts/                         ← Phase 2 expanded drafts
+│   │   ├── chapter_069_draft.txt
+│   │   └── …
+│   │
+│   └── validations/                    ← Phase 2 validation reports
+│       ├── chapter_069_report.json
+│       └── …
+│
+├── ── Phase 1 modules ──────────────
+├── config.py
+├── model_loader.py
+├── extractor.py
+├── canon_merger.py
+├── embedder.py
+├── retriever.py
+├── summarizer.py
+├── file_processor.py
+├── main.py
+│
+├── ── Phase 2 modules ──────────────
+├── phase2_config.py
+├── emotional_state.py
+├── thread_health.py
+├── tension_model.py
+├── outline_planner.py
+├── expander.py
+├── validator.py
+├── narrative_metrics.py
+├── forecasting.py
+├── phase2_main.py
+│
+├── ── Testing ──────────────────────
+├── tests/
+│   ├── test_thread_health.py
+│   ├── test_tension_model.py
+│   ├── test_emotional_state.py
+│   ├── test_forecasting.py
+│   └── test_integration.py
+│
+└── requirements.txt
+```
+
+---
+
+## `tests/test_thread_health.py`
+
+```python
+"""
+Unit tests for thread_health.py.
+Run without GPU / model — pure heuristic logic.
+"""
+
+import json
+import os
+import sys
+import tempfile
+import unittest
+
+# Point state files to temp directory before imports
+_tmpdir = tempfile.mkdtemp()
+os.environ["OUTPUT_DIR"] = _tmpdir
+
+# Ensure project root is importable
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
+import phase2_config as p2
+# Override file paths for isolation
+p2.THREAD_HEALTH_FILE = os.path.join(_tmpdir, "thread_health_state.json")
+
+from thread_health import ThreadHealthTracker
+
+
+class TestThreadHealth(unittest.TestCase):
+
+    def setUp(self):
+        """Fresh tracker each test."""
+        if os.path.exists(p2.THREAD_HEALTH_FILE):
+            os.remove(p2.THREAD_HEALTH_FILE)
+        self.tracker = ThreadHealthTracker()
+
+    def test_add_new_thread_via_advance(self):
+        new = [{"name": "The Lost Key", "importance": 4}]
+        self.tracker.advance_chapter(1, touched=["The Lost Key"],
+                                     new_threads=new)
+        self.assertIn("The Lost Key", self.tracker.threads)
+        self.assertEqual(self.tracker.threads["The Lost Key"]["importance"], 4)
+        self.assertEqual(self.tracker.threads["The Lost Key"]["status"], "active")
+
+    def test_pressure_increases_when_untouched(self):
+        new = [{"name": "Thread A", "importance": 5}]
+        self.tracker.advance_chapter(1, touched=["Thread A"], new_threads=new)
+        # importance 5 → dormancy threshold = 3 → pressure divisor = 2
+        # so pressure = chapters_since / (3*2) = chapters_since / 6
+        for ch in range(2, 8):
+            self.tracker.advance_chapter(ch, touched=[])
+
+        t = self.tracker.threads["Thread A"]
+        self.assertGreater(t["resolution_pressure"], 0.5)
+        self.assertEqual(t["chapters_since_touched"], 6)
+
+    def test_dormancy_triggers(self):
+        """Importance-5 thread should go dormant after 3 untouched chapters."""
+        new = [{"name": "Urgent", "importance": 5}]
+        self.tracker.advance_chapter(1, touched=["Urgent"], new_threads=new)
+        for ch in range(2, 6):  # 4 chapters untouched → exceeds threshold of 3
+            self.tracker.advance_chapter(ch, touched=[])
+
+        self.assertEqual(self.tracker.threads["Urgent"]["status"], "dormant")
+
+    def test_touching_resets_pressure(self):
+        new = [{"name": "X", "importance": 3}]
+        self.tracker.advance_chapter(1, touched=["X"], new_threads=new)
+        for ch in range(2, 6):
+            self.tracker.advance_chapter(ch, touched=[])
+        self.assertGreater(self.tracker.threads["X"]["resolution_pressure"], 0)
+
+        self.tracker.advance_chapter(6, touched=["X"])
+        self.assertEqual(self.tracker.threads["X"]["chapters_since_touched"], 0)
+        self.assertEqual(self.tracker.threads["X"]["resolution_pressure"], 0.0)
+
+    def test_resolution(self):
+        new = [{"name": "Mystery", "importance": 3}]
+        self.tracker.advance_chapter(1, touched=["Mystery"], new_threads=new)
+        self.tracker.advance_chapter(2, touched=["Mystery"],
+                                     resolved=["Mystery"])
+        self.assertEqual(self.tracker.threads["Mystery"]["status"], "resolved")
+
+    def test_resolved_thread_touched_warns(self):
+        new = [{"name": "Done", "importance": 2}]
+        self.tracker.advance_chapter(1, touched=["Done"], new_threads=new)
+        self.tracker.advance_chapter(2, touched=[], resolved=["Done"])
+        warnings = self.tracker.advance_chapter(3, touched=["Done"])
+        self.assertTrue(any("resolved" in w.lower() for w in warnings))
+
+    def test_narrative_position_escalation(self):
+        new = [{"name": "Climb", "importance": 3}]
+        self.tracker.advance_chapter(1, touched=["Climb"], new_threads=new)
+        self.assertEqual(
+            self.tracker.threads["Climb"]["narrative_position"], "setup")
+
+        self.tracker.escalate("Climb", 2)
+        self.assertEqual(
+            self.tracker.threads["Climb"]["narrative_position"], "escalating")
+
+        self.tracker.escalate("Climb", 3)
+        self.assertEqual(
+            self.tracker.threads["Climb"]["narrative_position"], "complication")
+
+    def test_persistence_roundtrip(self):
+        new = [{"name": "Persist", "importance": 4}]
+        self.tracker.advance_chapter(1, touched=["Persist"], new_threads=new)
+        self.tracker.save()
+
+        tracker2 = ThreadHealthTracker()
+        self.assertIn("Persist", tracker2.threads)
+        self.assertEqual(tracker2.threads["Persist"]["importance"], 4)
+
+    def test_init_from_story_state(self):
+        story_state = {
+            "plot_threads": {
+                "Alpha": {
+                    "introduced": 5,
+                    "status": "unresolved",
+                    "description": "test",
+                    "updates": [
+                        {"chapter": 5, "detail": "started"},
+                        {"chapter": 10, "detail": "advanced"},
+                    ],
+                },
+                "Beta": {
+                    "introduced": 3,
+                    "status": "resolved",
+                    "description": "done",
+                    "updates": [
+                        {"chapter": 3, "detail": "started"},
+                        {"chapter": 8, "detail": "Resolved"},
+                    ],
+                },
+            },
+            "metadata": {"chapters_processed": list(range(1, 21))},
+        }
+
+        added = self.tracker.init_from_story_state(story_state)
+        self.assertEqual(added, 2)
+        self.assertEqual(self.tracker.threads["Alpha"]["status"], "active")
+        self.assertEqual(self.tracker.threads["Beta"]["status"], "resolved")
+        # Alpha last touched ch 10, current ch 20 → since = 10
+        self.assertEqual(
+            self.tracker.threads["Alpha"]["chapters_since_touched"], 10)
+
+
+if __name__ == "__main__":
+    unittest.main()
+```
+
+---
+
+## `tests/test_tension_model.py`
+
+```python
+"""
+Unit tests for tension_model.py.
+Pure heuristic logic — no model needed.
+"""
+
+import os
+import sys
+import tempfile
+import unittest
+
+_tmpdir = tempfile.mkdtemp()
+os.environ["OUTPUT_DIR"] = _tmpdir
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
+import phase2_config as p2
+p2.TENSION_STATE_FILE = os.path.join(_tmpdir, "tension_state.json")
+
+from tension_model import TensionTracker
+
+
+class TestTensionModel(unittest.TestCase):
+
+    def setUp(self):
+        if os.path.exists(p2.TENSION_STATE_FILE):
+            os.remove(p2.TENSION_STATE_FILE)
+        self.t = TensionTracker()
+        self.t.init(0.30)
+
+    def test_initial_state(self):
+        self.assertAlmostEqual(self.t.current, 0.30)
+        self.assertEqual(self.t.phase, "setup")
+        self.assertEqual(self.t.trend, "stable")
+
+    def test_record_updates_tension(self):
+        self.t.record(1, 0.45)
+        self.assertAlmostEqual(self.t.current, 0.45)
+
+    def test_bounds_basic(self):
+        lo, hi = self.t.get_bounds()
+        self.assertGreater(hi, lo)
+        self.assertGreaterEqual(lo, 0.0)
+        self.assertLessEqual(hi, 1.0)
+
+    def test_no_triple_spike(self):
+        """After two consecutive spikes, third must be capped."""
+        self.t.record(1, 0.50)   # +0.20 → spike
+        self.t.record(2, 0.70)   # +0.20 → spike
+        lo, hi = self.t.get_bounds()
+        # hi should cap the delta at SPIKE_THRESHOLD (0.15)
+        self.assertLessEqual(hi, 0.70 + p2.SPIKE_THRESHOLD + 0.01)
+
+    def test_mandatory_cooldown_after_climax(self):
+        """After a climax chapter, tension must drop."""
+        self.t.init(0.75)
+        self.t.record(1, 0.85)  # → climax
+        lo, hi = self.t.get_bounds()
+        # hi should be at most current - COOLDOWN_MIN_DROP
+        self.assertLessEqual(hi, 0.85 - p2.COOLDOWN_MIN_DROP + 0.01)
+
+    def test_no_premature_climax(self):
+        """With <5 chapters of history, tension capped at 0.80."""
+        self.t.init(0.70)
+        lo, hi = self.t.get_bounds()
+        self.assertLessEqual(hi, 0.80 + 0.01)
+
+    def test_premature_climax_lifts_after_threshold(self):
+        """After 5+ chapters, the 0.80 cap is removed."""
+        self.t.init(0.50)
+        for ch in range(1, 7):
+            self.t.record(ch, 0.50 + ch * 0.04)
+        lo, hi = self.t.get_bounds()
+        self.assertGreater(hi, 0.80)
+
+    def test_stagnation_warning(self):
+        """Flat tension for STAGNATION_WINDOW chapters triggers warning."""
+        self.t.init(0.50)
+        for ch in range(1, p2.STAGNATION_WINDOW + 1):
+            self.t.record(ch, 0.50)
+        # Now validate a flat continuation
+        ok, issues = self.t.validate_planned(0.50)
+        self.assertTrue(any("stagnation" in i.lower() for i in issues))
+
+    def test_arc_phase_transitions(self):
+        self.t.init(0.20)
+        self.t.record(1, 0.25)
+        self.assertEqual(self.t.phase, "setup")
+
+        self.t.record(2, 0.40)
+        self.t.record(3, 0.55)
+        self.assertIn(self.t.phase, ("rising", "setup"))
+
+        self.t.record(4, 0.65)
+        self.t.record(5, 0.75)
+        self.t.record(6, 0.82)
+        self.assertEqual(self.t.phase, "climax")
+
+        self.t.record(7, 0.60)
+        self.assertEqual(self.t.phase, "cooldown")
+
+    def test_persistence(self):
+        self.t.record(1, 0.55)
+        self.t.save()
+        t2 = TensionTracker()
+        self.assertAlmostEqual(t2.current, 0.55)
+        self.assertEqual(len(t2.history), 1)
+
+
+if __name__ == "__main__":
+    unittest.main()
+```
+
+---
+
+## `tests/test_emotional_state.py`
+
+```python
+"""
+Unit tests for emotional_state.py.
+"""
+
+import os
+import sys
+import tempfile
+import unittest
+
+_tmpdir = tempfile.mkdtemp()
+os.environ["OUTPUT_DIR"] = _tmpdir
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
+import phase2_config as p2
+p2.EMOTIONAL_STATE_FILE = os.path.join(_tmpdir, "emotional_state.json")
+
+from emotional_state import EmotionalState
+
+
+class TestEmotionalState(unittest.TestCase):
+
+    def setUp(self):
+        if os.path.exists(p2.EMOTIONAL_STATE_FILE):
+            os.remove(p2.EMOTIONAL_STATE_FILE)
+        self.emo = EmotionalState()
+
+    def test_ensure_creates_default(self):
+        self.emo.ensure("Alice")
+        dims = self.emo.get_dims("Alice")
+        for d in p2.EMOTIONAL_DIMENSIONS:
+            self.assertAlmostEqual(dims[d], p2.EMOTIONAL_DEFAULT)
+
+    def test_apply_shifts_basic(self):
+        self.emo.ensure("Bob")
+        warnings = self.emo.apply_shifts(
+            chapter=1,
+            shifts={"Bob": {"hope": 0.15, "fear": -0.10}},
+            triggering_events={"Bob": "found an ally"},
+        )
+        dims = self.emo.get_dims("Bob")
+        self.assertAlmostEqual(dims["hope"], 0.65)
+        self.assertAlmostEqual(dims["fear"], 0.40)
+        self.assertEqual(len(warnings), 0)
+
+    def test_delta_clamping(self):
+        """Deltas exceeding MAX_EMOTIONAL_DELTA are clamped."""
+        self.emo.ensure("Carol")
+        warnings = self.emo.apply_shifts(
+            chapter=1,
+            shifts={"Carol": {"anger": 0.50}},  # exceeds 0.30
+            triggering_events={"Carol": "betrayal"},
+        )
+        dims = self.emo.get_dims("Carol")
+        # should be 0.5 + 0.3 (clamped) = 0.8
+        self.assertAlmostEqual(dims["anger"], 0.80)
+        self.assertTrue(any("clamped" in w for w in warnings))
+
+    def test_value_clamping(self):
+        """Dimension values stay within [0, 1]."""
+        self.emo.ensure("Dave")
+        self.emo.apply_shifts(1, {"Dave": {"grief": 0.30}})
+        self.emo.apply_shifts(2, {"Dave": {"grief": 0.30}})
+        dims = self.emo.get_dims("Dave")
+        self.assertLessEqual(dims["grief"], 1.0)
+
+    def test_trigger_event_warning(self):
+        """Large shift without trigger_event should warn."""
+        self.emo.ensure("Eve")
+        warnings = self.emo.apply_shifts(
+            chapter=1,
+            shifts={"Eve": {"trust": -0.25}},
+            triggering_events={},  # no trigger
+        )
+        self.assertTrue(any("triggering event" in w for w in warnings))
+
+    def test_small_shift_no_trigger_warning(self):
+        """Small shift should NOT require trigger."""
+        self.emo.ensure("Frank")
+        warnings = self.emo.apply_shifts(
+            chapter=1,
+            shifts={"Frank": {"hope": 0.10}},
+            triggering_events={},
+        )
+        trigger_warnings = [w for w in warnings if "triggering event" in w]
+        self.assertEqual(len(trigger_warnings), 0)
+
+    def test_unknown_dimension_warns(self):
+        self.emo.ensure("Gina")
+        warnings = self.emo.apply_shifts(
+            chapter=1,
+            shifts={"Gina": {"jealousy": 0.10}},
+        )
+        self.assertTrue(any("Unknown dimension" in w for w in warnings))
+
+    def test_validate_planned(self):
+        ok, issues = self.emo.validate_planned_shifts(
+            {"Hero": {"hope": 0.50}}  # exceeds MAX
+        )
+        self.assertFalse(ok)
+        self.assertTrue(any("exceeds" in i for i in issues))
+
+    def test_history_recorded(self):
+        self.emo.ensure("Hank")
+        self.emo.apply_shifts(
+            1, {"Hank": {"fear": 0.15}},
+            triggering_events={"Hank": "ambush"})
+        self.assertEqual(len(self.emo.history), 1)
+        self.assertEqual(self.emo.history[0]["character"], "Hank")
+        self.assertEqual(self.emo.history[0]["trigger"], "ambush")
+
+    def test_init_from_story_state(self):
+        story_state = {
+            "characters": {
+                "Zara": {"status": "alive"},
+                "Yuri": {"status": "dead"},
+            },
+        }
+        added = self.emo.init_from_story_state(story_state)
+        self.assertEqual(added, 2)
+        self.assertIn("Zara", self.emo.characters)
+        self.assertIn("Yuri", self.emo.characters)
+
+    def test_persistence(self):
+        self.emo.ensure("Test")
+        self.emo.apply_shifts(1, {"Test": {"hope": 0.20}},
+                              triggering_events={"Test": "win"})
+        self.emo.save()
+        emo2 = EmotionalState()
+        dims = emo2.get_dims("Test")
+        self.assertAlmostEqual(dims["hope"], 0.70)
+
+
+if __name__ == "__main__":
+    unittest.main()
+```
+
+---
+
+## `tests/test_forecasting.py`
+
+```python
+"""
+Unit tests for forecasting.py.
+Pure heuristics — no model needed.
+"""
+
+import os
+import sys
+import tempfile
+import unittest
+
+_tmpdir = tempfile.mkdtemp()
+os.environ["OUTPUT_DIR"] = _tmpdir
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
+import phase2_config as p2
+p2.THREAD_HEALTH_FILE = os.path.join(_tmpdir, "thread_health_state.json")
+p2.TENSION_STATE_FILE = os.path.join(_tmpdir, "tension_state.json")
+
+from thread_health import ThreadHealthTracker
+from tension_model import TensionTracker
+from forecasting import forecast
+
+
+class TestForecasting(unittest.TestCase):
+
+    def setUp(self):
+        for f in (p2.THREAD_HEALTH_FILE, p2.TENSION_STATE_FILE):
+            if os.path.exists(f):
+                os.remove(f)
+
+    def test_forecast_runs_without_error(self):
+        """Forecast should work even with empty state."""
+        tension = TensionTracker()
+        tension.init(0.40)
+        tracker = ThreadHealthTracker()
+        tracker.save()
+
+        result = forecast(horizon=3)
+        self.assertIn("tension_trajectory", result)
+        self.assertIn("thread_projections", result)
+        self.assertIn("collision_risk", result)
+        self.assertEqual(len(result["tension_trajectory"]), 3)
+
+    def test_escalation_prediction(self):
+        """Thread approaching dormancy should appear in escalating list."""
+        tracker = ThreadHealthTracker()
+        new = [{"name": "Bomb", "importance": 4}]
+        tracker.advance_chapter(1, touched=["Bomb"], new_threads=new)
+        # Advance without touching — importance 4 → threshold 5, divisor 2 → divisor*threshold=10
+        # pressure = since / 10
+        for ch in range(2, 7):
+            tracker.advance_chapter(ch, touched=[])
+        # since = 5, pressure = 0.5
+        # In 1 more chapter: since=6, pressure=0.6 → escalates
+
+        tension = TensionTracker()
+        tension.init(0.40)
+
+        result = forecast(horizon=3)
+        esc = result["thread_projections"]["escalating"]
+        names = [e["thread"] for e in esc]
+        self.assertIn("Bomb", names)
+
+    def test_collision_detection(self):
+        """Two high-importance threads both nearing pressure should collide."""
+        tracker = ThreadHealthTracker()
+        tracker.advance_chapter(1,
+                                touched=["A", "B"],
+                                new_threads=[
+                                    {"name": "A", "importance": 5},
+                                    {"name": "B", "importance": 5},
+                                ])
+        # Advance both untouched for several chapters
+        for ch in range(2, 6):
+            tracker.advance_chapter(ch, touched=[])
+
+        tension = TensionTracker()
+        tension.init(0.40)
+
+        result = forecast(horizon=3)
+        risk = result["collision_risk"]["risk"]
+        self.assertIn(risk, ("moderate", "high"))
+
+
+if __name__ == "__main__":
+    unittest.main()
+```
+
+---
+
+## `tests/test_integration.py`
+
+```python
+"""
+Integration test: full workflow without actual LLM.
+Mocks ModelLoader.generate to return predictable JSON.
+Tests the flow: init → outline → expand → validate → update.
+"""
+
+import json
+import os
+import sys
+import tempfile
+import unittest
+from unittest.mock import patch
+
+_tmpdir = tempfile.mkdtemp()
+os.environ["OUTPUT_DIR"] = _tmpdir
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
+import config
+config.OUTPUT_DIR = _tmpdir
+config.STORY_STATE_FILE = os.path.join(_tmpdir, "story_state.json")
+config.CONFLICT_LOG_FILE = os.path.join(_tmpdir, "conflict_log.json")
+config.CHAPTERS_DIR = os.path.join(_tmpdir, "chapters")
+config.INDEX_DIR = os.path.join(_tmpdir, "index")
+os.makedirs(config.CHAPTERS_DIR, exist_ok=True)
+os.makedirs(config.INDEX_DIR, exist_ok=True)
+
+import phase2_config as p2
+p2.OUTLINES_DIR = os.path.join(_tmpdir, "outlines")
+p2.DRAFTS_DIR = os.path.join(_tmpdir, "drafts")
+p2.VALIDATIONS_DIR = os.path.join(_tmpdir, "validations")
+p2.THREAD_HEALTH_FILE = os.path.join(_tmpdir, "thread_health_state.json")
+p2.TENSION_STATE_FILE = os.path.join(_tmpdir, "tension_state.json")
+p2.EMOTIONAL_STATE_FILE = os.path.join(_tmpdir, "emotional_state.json")
+for d in (p2.OUTLINES_DIR, p2.DRAFTS_DIR, p2.VALIDATIONS_DIR):
+    os.makedirs(d, exist_ok=True)
+
+
+# ── Seed Phase 1 state ──────────────────────────────────────────
+
+SEED_STATE = {
+    "characters": {
+        "Kael": {
+            "first_appearance": 1,
+            "status": "alive",
+            "description": "A young mage seeking answers",
+            "abilities": ["fire magic"],
+            "relationships": [{"character": "Sera", "relationship": "ally"}],
+            "updates": [{"chapter": 1, "detail": "Introduced"}],
+        },
+        "Sera": {
+            "first_appearance": 2,
+            "status": "alive",
+            "description": "Warrior and Kael's companion",
+            "abilities": ["swordsmanship"],
+            "relationships": [{"character": "Kael", "relationship": "ally"}],
+            "updates": [{"chapter": 2, "detail": "Introduced"}],
+        },
+    },
+    "events": [
+        {"chapter": 1, "event": "Kael discovers his fire magic"},
+        {"chapter": 2, "event": "Sera joins the party"},
+        {"chapter": 3, "event": "The Shadow Gate opens"},
+    ],
+    "plot_threads": {
+        "Shadow Gate Mystery": {
+            "introduced": 3,
+            "status": "unresolved",
+            "description": "A dark portal has opened",
+            "updates": [{"chapter": 3, "detail": "Portal discovered"}],
+        },
+    },
+    "metadata": {
+        "last_updated": "2025-01-01T00:00:00+00:00",
+        "chapters_processed": [1, 2, 3],
+    },
+}
+
+
+# ── Mock outline response ───────────────────────────────────────
+
+MOCK_OUTLINE = json.dumps({
+    "chapter_number": 4,
+    "scene_count": 3,
+    "opening_tension": 0.35,
+    "closing_tension": 0.50,
+    "scenes": [
+        {
+            "scene_number": 1,
+            "summary": "Kael and Sera approach the Shadow Gate",
+            "pov_character": "Kael",
+            "setting": "The Darkened Plains",
+            "emotional_shifts": {"Kael": {"fear": 0.15, "hope": -0.10}},
+            "thread_interactions": ["Shadow Gate Mystery"],
+            "tension_delta": 0.05,
+            "notes": "Building dread",
+        },
+        {
+            "scene_number": 2,
+            "summary": "Sera reveals a secret about her past",
+            "pov_character": "Sera",
+            "setting": "Campfire",
+            "emotional_shifts": {"Sera": {"trust": 0.20}},
+            "thread_interactions": [],
+            "tension_delta": 0.00,
+            "notes": "Character moment",
+        },
+        {
+            "scene_number": 3,
+            "summary": "They enter the Gate and face a guardian",
+            "pov_character": "Kael",
+            "setting": "Inside the Shadow Gate",
+            "emotional_shifts": {"Kael": {"anger": 0.10}},
+            "thread_interactions": ["Shadow Gate Mystery"],
+            "tension_delta": 0.10,
+            "notes": "Action sequence",
+        },
+    ],
+    "threads_advanced": ["Shadow Gate Mystery"],
+    "threads_to_resolve": [],
+    "risk_flags": [],
+})
+
+MOCK_SCENE_TEXT = (
+    "Kael stepped through the shimmering darkness of the Shadow Gate. "
+    "The air crackled with an energy he could feel in his bones. Sera raised "
+    "her sword, eyes scanning the void ahead. 'Stay close,' she murmured. "
+    "A shape coalesced before them — a guardian of living shadow, its eyes "
+    "burning with cold fire. Kael reached for his magic, flames dancing "
+    "along his fingertips. The guardian spoke in a voice like grinding stone. "
+    "'You seek passage. You must earn it.' Kael set his jaw and charged."
+)
+
+MOCK_VALIDATION = json.dumps({
+    "scenes": [
+        {"scene": 1, "covered": "YES", "note": "Approach is depicted"},
+        {"scene": 2, "covered": "PARTIAL", "note": "Secret hinted but not fully revealed"},
+        {"scene": 3, "covered": "YES", "note": "Guardian confrontation present"},
+    ],
+    "overall_adherence": "moderate",
+})
+
+
+def _mock_generate(prompt, max_tokens=None, temperature=None):
+    """Route different prompts to different mock responses."""
+    if "scene-by-scene outline" in prompt:
+        return MOCK_OUTLINE
+    if "outline" in prompt.lower() and "adherence" in prompt.lower():
+        return MOCK_VALIDATION
+    return MOCK_SCENE_TEXT
+
+
+class TestIntegration(unittest.TestCase):
+
+    def setUp(self):
+        with open(config.STORY_STATE_FILE, "w") as f:
+            json.dump(SEED_STATE, f)
+        # clean P2 state
+        for p in (p2.THREAD_HEALTH_FILE, p2.TENSION_STATE_FILE,
+                  p2.EMOTIONAL_STATE_FILE):
+            if os.path.exists(p):
+                os.remove(p)
+
+    @patch("model_loader.ModelLoader.generate", side_effect=_mock_generate)
+    def test_full_workflow(self, mock_gen):
+        from thread_health import ThreadHealthTracker
+        from tension_model import TensionTracker
+        from emotional_state import EmotionalState
+        from outline_planner import generate_outline, approve_outline
+        from expander import expand_chapter
+        from validator import validate_chapter
+        from narrative_metrics import display
+        from forecasting import forecast
+
+        # ── Step 1: init ─────────────────────────────────────────
+        tracker = ThreadHealthTracker()
+        tracker.init_from_story_state(SEED_STATE)
+        self.assertIn("Shadow Gate Mystery", tracker.threads)
+
+        tension = TensionTracker()
+        tension.init(0.35)
+        self.assertAlmostEqual(tension.current, 0.35)
+
+        emo = EmotionalState()
+        emo.init_from_story_state(SEED_STATE)
+        self.assertIn("Kael", emo.characters)
+
+        # ── Step 2: outline ──────────────────────────────────────
+        outline = generate_outline(4, "Kael and Sera enter the Shadow Gate")
+        self.assertIsNotNone(outline)
+        self.assertEqual(outline["chapter_number"], 4)
+        self.assertEqual(len(outline["scenes"]), 3)
+
+        # ── Step 3: approve ──────────────────────────────────────
+        ok = approve_outline(4)
+        self.assertTrue(ok)
+
+        # ── Step 4: expand ───────────────────────────────────────
+        draft = expand_chapter(4)
+        self.assertIsNotNone(draft)
+        self.assertGreater(len(draft), 100)
+        self.assertTrue(os.path.exists(
+            os.path.join(p2.DRAFTS_DIR, "chapter_004_draft.txt")))
+
+        # ── Step 5: validate ─────────────────────────────────────
+        report = validate_chapter(4)
+        self.assertIsNotNone(report)
+        self.assertIn("checks", report)
+        self.assertIn("overall_risk", report)
+
+        # ── Step 6: update state ─────────────────────────────────
+        from outline_planner import load_outline
+        outline = load_outline(4)
+
+        warnings = tracker.advance_chapter(
+            4,
+            touched=outline.get("threads_advanced", []),
+            resolved=outline.get("threads_to_resolve", []),
+        )
+        self.assertIsInstance(warnings, list)
+
+        t_warnings = tension.record(4, outline["closing_tension"])
+        self.assertAlmostEqual(tension.current, 0.50)
+
+        all_shifts = {}
+        triggers = {}
+        for scene in outline.get("scenes", []):
+            for char, dims in scene.get("emotional_shifts", {}).items():
+                if char not in all_shifts:
+                    all_shifts[char] = {}
+                for dim, delta in dims.items():
+                    all_shifts[char][dim] = all_shifts[char].get(dim, 0) + delta
+                triggers[char] = scene.get("summary", "")[:80]
+        e_warnings = emo.apply_shifts(4, all_shifts, triggers)
+        self.assertIsInstance(e_warnings, list)
+
+        # Kael's fear should have increased
+        kael_dims = emo.get_dims("Kael")
+        self.assertGreater(kael_dims["fear"], p2.EMOTIONAL_DEFAULT)
+
+        # ── Step 7: metrics ──────────────────────────────────────
+        output = display()
+        self.assertIn("NARRATIVE", output)
+
+        # ── Step 8: forecast ─────────────────────────────────────
+        result = forecast()
+        self.assertIn("tension_trajectory", result)
+
+
+if __name__ == "__main__":
+    unittest.main()
+```
+
+---
+
+## Updated `requirements.txt`
+
+```txt
+llama-cpp-python>=0.2.0
+sentence-transformers>=2.2.0
+faiss-cpu>=1.7.0
+numpy>=1.24.0
+```
+
+---
+
+## Test Protocol (Pre-Chapter Writing)
+
+Run these before writing any real chapters through the system:
+
+```bash
+# ────────────────────────────────────────────────────
+# STAGE 1: Unit tests — no GPU, no model, instant
+# ────────────────────────────────────────────────────
+python -m pytest tests/test_thread_health.py -v
+python -m pytest tests/test_tension_model.py -v
+python -m pytest tests/test_emotional_state.py -v
+python -m pytest tests/test_forecasting.py -v
+
+# ────────────────────────────────────────────────────
+# STAGE 2: Integration test — mocked model
+# ────────────────────────────────────────────────────
+python -m pytest tests/test_integration.py -v
+
+# ────────────────────────────────────────────────────
+# STAGE 3: Smoke test — real model, your actual data
+# ────────────────────────────────────────────────────
+
+# 3a. Ensure Phase 1 has run
+python main.py extract
+python main.py build_index
+
+# 3b. Initialise Phase 2 from Phase 1 state
+python phase2_main.py init
+
+# 3c. Inspect the initialised state
+python phase2_main.py inspect threads
+python phase2_main.py inspect tension
+python phase2_main.py inspect emotional
+
+# 3d. Adjust any important thread weights
+python phase2_main.py set_importance "Shadow Gate Mystery" 5
+
+# 3e. Generate one test outline
+python phase2_main.py outline 69 "Test direction — character discovers something"
+
+# 3f. Review the outline JSON
+cat output/outlines/chapter_069_outline.json | python -m json.tool
+
+# 3g. Approve and expand
+python phase2_main.py approve 69
+python phase2_main.py expand 69
+
+# 3h. Validate
+python phase2_main.py validate 69
+
+# 3i. View metrics and forecast
+python phase2_main.py metrics
+python phase2_main.py forecast
+
+# 3j. If everything looks sane, delete the test files:
+#     rm output/outlines/chapter_069_*
+#     rm output/drafts/chapter_069_*
+#     rm output/validations/chapter_069_*
+```
+
+**What to look for at each stage:**
+
+| Stage | Pass criteria |
+|---|---|
+| Unit tests | All green. Heuristics produce expected numbers. |
+| Integration | Full workflow completes. Mock responses parse. State files update correctly. |
+| `init` | Thread count matches story_state plot threads. Tension is a reasonable 0.25–0.60. All characters appear in emotional state. |
+| `outline` | Valid JSON. 3–6 scenes. Closing tension within bounds. Known thread names referenced. No hallucinated character names. |
+| `expand` | Readable prose. Roughly SCENE_WORD_TARGET × scene_count words. Scenes connect to each other. |
+| `validate` | Report is structured JSON. No crashes. Adherence assessment is coherent. |
+| `metrics` | Dashboard renders. Thread table populated. Tension bar visible. |
+| `forecast` | Three projections shown. Escalating threads match intuition. |
+
+---
+
+## Minimal Viable Implementation Plan
+
+```
+ORDER   FILE                  DEPENDS ON           MINUTES   TEST WITH
+─────   ───────────────────   ──────────────────   ───────   ─────────────────────
+  1     phase2_config.py      config.py            10        import check
+  2     emotional_state.py    phase2_config        30        test_emotional_state
+  3     thread_health.py      phase2_config        40        test_thread_health
+  4     tension_model.py      phase2_config        30        test_tension_model
+  5     forecasting.py        thread+tension       20        test_forecasting
+  6     narrative_metrics.py  thread+tension+emo   20        visual inspect
+  7     outline_planner.py    all state + P1 RAG   45        mock + real model
+  8     expander.py           outline_planner      30        real model
+  9     validator.py          outline + expander   30        real model
+ 10     phase2_main.py        everything           30        test_integration
+─────                                              ───
+TOTAL                                              ~285 min ≈ 5 hours
+```
+
+**Recommended deploy order:**
+
+1. Get modules 1–6 running and tested (no model needed)
+2. Run `init` against your real Phase 1 data
+3. Manually inspect all three state files for sanity
+4. Adjust thread importance values for your story
+5. Test outline generation with the real model
+6. Test expansion with the real model
+7. Run one full cycle, review everything
+8. Begin writing chapters 69+
+
+---
+
+## Chapter Writing Workflow (Steady State)
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  For each new chapter:                                          │
+│                                                                 │
+│  1. python phase2_main.py outline N "your direction here"       │
+│     → review outline JSON, edit if needed                       │
+│                                                                 │
+│  2. python phase2_main.py approve N                             │
+│                                                                 │
+│  3. python phase2_main.py expand N                              │
+│     → review draft, edit/rewrite as needed                      │
+│                                                                 │
+│  4. python phase2_main.py validate N                            │
+│     → review report, address any issues                         │
+│                                                                 │
+│  5. Copy final chapter to chapters/chapter_N.txt                │
+│                                                                 │
+│  6. python main.py extract          (Phase 1 canonisation)      │
+│                                                                 │
+│  7. python phase2_main.py update N  (Phase 2 state sync)        │
+│                                                                 │
+│  8. python phase2_main.py metrics   (sanity check)              │
+│                                                                 │
+│  Periodically:                                                  │
+│    python main.py build_index       (rebuild FAISS index)       │
+│    python phase2_main.py forecast   (check trajectory)          │
+│    python main.py summary           (regenerate canon bible)    │
+└─────────────────────────────────────────────────────────────────┘
+```
